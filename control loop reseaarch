@@ -1,0 +1,23 @@
+A. Hybrid Position/Force Control (HPFC)
+
+B. Force Control with Inner Torque & Position Loops
+
+C. Impedance / Admittance Control
+Instead of tracking an explicit force target, this approach regulates the dynamic relationship between position error and force:
+
+
+Sensor Fusion & Observer Design Directly converting motor current (\[I\]) to torque (\(\tau = K_t \cdot I\)) yields inaccuracies due to non-linearities like cogging torque and harmonic drive friction. Current research heavily utilizes Extended Kalman Filters (EKF) and Sliding Mode Observers (SMO). These models fuse motor current with high-frequency encoder acceleration to dynamically map and subtract internal friction, allowing the system to isolate true environmental impact forces before the slower load cell can even register the shock
+
+
+Contact Transition Stability (Chattering Mitigation)
+The instant an actuator moves from free space (position control) to a rigid environment (force control), the discontinuity often induces high-frequency bouncing, known as chattering. Researchers leverage embedded current sensing to capture the instantaneous current spike at impact. This triggers an immediate, sub-millisecond reduction in position loop gains, easing the system smoothly into load cell-governed force regulation
+
+
+Structural Compliance Compensation
+Because load cells are often placed at the tool tip or end-effector and encoders are placed at the motor shaft, mechanical deflections in the intermediate linkages or gearboxes introduce errors. Active research involves training machine learning or model-less adaptive networks to map the delta between the encoder state and the load cell state. This allows the controller to predict structural deflection in real time and alter position commands to preserve path accuracy
+
+https://www.researchgate.net/publication/293193096_Model-Less_Hybrid_PositionForce_Control_A_Minimalist_Approach_for_Continuum_Manipulators_in_Unknown_Constrained_Environments
+
+
+
+https://pmc.ncbi.nlm.nih.gov/articles/PMC3231115/
