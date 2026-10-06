@@ -1,0 +1,119 @@
+<?xml version="1.0" ?>
+<mujoco model="franka_panda">
+  <compiler angle="radian" coordinate="local" inertiafromgeom="true"/>
+  <option integrator="RK4" timestep="0.002"/>
+
+  <default>
+    <joint limited="true" range="-3.14159 3.14159" damping="1"/>
+    <geom conaffinity="0" condim="1" density="5000"/>
+    <equality solref="0.02 1"/>
+  </default>
+
+  <worldbody>
+    <!-- Base -->
+    <geom name="base" size="0.1 0.1 0.1" type="box" pos="0 0 0"/>
+
+    <!-- Arm: Franka Panda 7-DOF -->
+    <body name="link0" pos="0 0 0.333">
+      <joint name="joint1" type="hinge" axis="0 0 1" range="-2.8973 2.8973"/>
+      <geom name="link0_geom" size="0.08" type="sphere"/>
+      <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+      <body name="link1" pos="0 0 0.15">
+        <joint name="joint2" type="hinge" axis="0 1 0" range="-1.7628 1.7628"/>
+        <geom name="link1_geom" size="0.08" type="sphere"/>
+        <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+        <body name="link2" pos="0 0 0.15">
+          <joint name="joint3" type="hinge" axis="0 0 1" range="-2.8973 2.8973"/>
+          <geom name="link2_geom" size="0.08" type="sphere"/>
+          <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+          <body name="link3" pos="0 0 0.15">
+            <joint name="joint4" type="hinge" axis="0 1 0" range="-3.0718 -0.0698"/>
+            <geom name="link3_geom" size="0.08" type="sphere"/>
+            <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+            <body name="link4" pos="0 0 0.15">
+              <joint name="joint5" type="hinge" axis="0 0 1" range="-2.8973 2.8973"/>
+              <geom name="link4_geom" size="0.08" type="sphere"/>
+              <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+              <body name="link5" pos="0 0 0.15">
+                <joint name="joint6" type="hinge" axis="0 1 0" range="-0.0175 3.7525"/>
+                <geom name="link5_geom" size="0.08" type="sphere"/>
+                <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+                <body name="link6" pos="0 0 0.15">
+                  <joint name="joint7" type="hinge" axis="0 0 1" range="-2.8973 2.8973"/>
+                  <geom name="link6_geom" size="0.08" type="sphere"/>
+                  <inertial mass="1" pos="0 0 0" diaginv="1 1 1"/>
+
+                  <!-- End-effector (tool frame) -->
+                  <body name="ee_link" pos="0 0 0.12">
+                    <inertial mass="0.1" pos="0 0 0" diaginv="0.001 0.001 0.001"/>
+                    <geom name="ee_geom" size="0.03" type="sphere"/>
+                    <!-- Force/torque sensor site -->
+                    <site name="ee_site" type="sphere" size="0.01" pos="0 0 0"/>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- Obstacle for contact testing -->
+    <body name="wall" pos="0.8 0 0.5">
+      <geom name="wall_geom" size="0.05 0.3 0.3" type="box"/>
+      <inertial mass="1000" pos="0 0 0" diaginv="1 1 1"/>
+    </body>
+  </worldbody>
+
+  <!-- Actuators (torque-controlled) -->
+  <actuator>
+    <motor name="motor1" joint="joint1" ctrlrange="-87 87"/>
+    <motor name="motor2" joint="joint2" ctrlrange="-87 87"/>
+    <motor name="motor3" joint="joint3" ctrlrange="-87 87"/>
+    <motor name="motor4" joint="joint4" ctrlrange="-12 12"/>
+    <motor name="motor5" joint="joint5" ctrlrange="-120 120"/>
+    <motor name="motor6" joint="joint6" ctrlrange="-120 120"/>
+    <motor name="motor7" joint="joint7" ctrlrange="-120 120"/>
+  </actuator>
+
+  <!-- Sensors -->
+  <sensor>
+    <!-- Joint position sensors (encoder) -->
+    <jointpos name="qpos1" joint="joint1"/>
+    <jointpos name="qpos2" joint="joint2"/>
+    <jointpos name="qpos3" joint="joint3"/>
+    <jointpos name="qpos4" joint="joint4"/>
+    <jointpos name="qpos5" joint="joint5"/>
+    <jointpos name="qpos6" joint="joint6"/>
+    <jointpos name="qpos7" joint="joint7"/>
+
+    <!-- Joint velocity sensors -->
+    <jointvel name="qvel1" joint="joint1"/>
+    <jointvel name="qvel2" joint="joint2"/>
+    <jointvel name="qvel3" joint="joint3"/>
+    <jointvel name="qvel4" joint="joint4"/>
+    <jointvel name="qvel5" joint="joint5"/>
+    <jointvel name="qvel6" joint="joint6"/>
+    <jointvel name="qvel7" joint="joint7"/>
+
+    <!-- Actuator force sensors (motor current proxy) -->
+    <actuatorfrc name="tau1" actuator="motor1"/>
+    <actuatorfrc name="tau2" actuator="motor2"/>
+    <actuatorfrc name="tau3" actuator="motor3"/>
+    <actuatorfrc name="tau4" actuator="motor4"/>
+    <actuatorfrc name="tau5" actuator="motor5"/>
+    <actuatorfrc name="tau6" actuator="motor6"/>
+    <actuatorfrc name="tau7" actuator="motor7"/>
+
+    <!-- End-effector force/torque sensor (6-axis load cell) -->
+    <siteforce name="ee_fx" site="ee_site"/>
+    <siteforce name="ee_fy" site="ee_site"/>
+    <siteforce name="ee_fz" site="ee_site"/>
+  </sensor>
+</mujoco>
