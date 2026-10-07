@@ -1,0 +1,59 @@
+The project environment is set up at ~/Special-topics-dev/mujoco_force_control/.venv. Dependency consistency and imports all passed, including MuJoCo, PyTorch, Transformers, and Ray.
+
+Your terminal is now in the correct project directory with its .venv activated. The clone landed in ~/Special-topics-dev because d was a typo; no need to clone again. The extra ~/.venv created by the earlier commands is untouched.
+
+
+cd ~/Special-topics-dev/mujoco_force_control
+To also activate the project’s virtual environment in the same command:
+
+cd ~/Special-topics-dev/mujoco_force_control && source .venv/bin/activate
+
+Next, run a small data-collection check before committing to the full dataset. Your terminal is already in the project directory with its venv active:
+
+python scripts/collect_data.py --num_rollouts 10 --output_dir dataset/test
+
+
+
+he rollout now simulates successfully, but saving fails because np.random.choice supplies the scenario as a NumPy string, which h5py won’t accept as an attribute value. I’m checking the dataset writer and metadata types so the fix handles this cleanly without altering the recorded trajectory.
+
+The local checkout is now past the model-loading and HDF5 errors. A 1-rollout, 3-step smoke test completed and saved an HDF5 file.
+
+Run your 10-rollout collection from the project directory:
+
+PYTHONPATH=.. python scripts/collect_data.py --num_rollouts 10 --output_dir dataset/test
+
+A rollout is one simulated episode: the arm resets, follows a target motion for a set number of steps, and the project records each step’s images, joint state, force, and target position into one HDF5 file.
+
+By default, each rollout has 500 steps. So 10 rollouts means 10 episodes and 10 files; the earlier smoke test used just 3 steps in one episode.
+
+I added a --render option to the collector. Run one rollout in the VS Code terminal to open the live MuJoCo viewer:
+
+cd ~/Special-topics-dev/mujoco_force_control
+PYTHONPATH=.. python scripts/collect_data.py --num_rollouts 1 --rollout_steps 500 --render --output_dir dataset/viewed
+
+
+The viewer syncs as the simulation steps. Run it in a desktop session with a display; omit --render for headless collection.
+
+
+
+PYTHONPATH=.. python scripts/collect_data.py --num_rollouts 10 --output_dir dataset/test
+Collecting 10 rollouts to dataset/test/
+Using scenarios: ['sinusoid', 'step', 'random_walk']
+Collecting rollouts: 100%|████████████████████████████████████████████████████████████████████████| 10/10 [04:33<00:00, 27.31s/it]
+✓ Collected 10 rollouts
+  Saved to: dataset/test
+  Total size: 0.75 GB
+
+  that XML is a toy arm made from spheres, not a Franka Panda. I’ll check the installed asset layout and the official MuJoCo Menagerie model, then adapt the real model while preserving this project’s joint and sensor interfaces.
+
+he official Menagerie Panda uses real visual/collision meshes, but its default actuators are position servos while this project commands torques. I’m fetching just that robot package so I can vendor the real geometry and retain the project’s current torque-controller contract.
+
+
+he real Panda now loads and steps correctly: 67 meshes, 7 arm joints, 8 actuators, and a 3-axis force sensor. I’m switching collection to command joint-position targets directly and constraining generated trajectories to the Panda’s actual joint ranges; the torque PD class can remain for its later phase
+
+
+Implemented in the local clone at ~/Special-topics-dev: the sphere placeholder is now the official Menagerie Panda with its mesh assets and license. The environment and collector use the stock position servos, keep the gripper open, and generate targets within the Panda’s joint limits. The README and plan include a note that torque actuation comes later, with a separate dataset.
+
+Validation passed for model loading (67 meshes), environment stepping, short data collection, and a 50-step rendered rollout with nonblank Panda frames. The earlier exit 139 did not recur; MuJoCo did log an NV-GLX warning. Compile and diff checks passed.
+
+Two caveats: importing PyTorch currently segfaults in this venv, so training and checkpoint evaluation remain unverified. Some older “PD baseline” wording remains in the README and Phase 2 plan heading; the torque-later note is present, but my docs cleanup hit patch-context errors. Should I make a docs-only cleanup pass?
