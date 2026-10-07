@@ -88,3 +88,26 @@ raining is reaching the model now; the failure is a feature-size mismatch: the e
 
  Your exact 3-epoch CUDA training run now completes and saves checkpoints/test/pi05_best.pt. One-trial checkpoint evaluation also completes. Its RMSE is still high after only three epochs, so treat this run as a pipeline smoke test,
  not a performance result. Syntax and diff checks pass.
+
+
+
+ NEXT STEP 
+ The 10-rollout run proved the pipeline works; its 3-epoch score is only a smoke-test result. Next, collect a larger dataset, then train and evaluate it. 
+ For a manageable step up, try 50 rollouts:
+ Keep the 10-rollout set as a pipeline smoke test. Next, add the cup and a dynamic ball to the Panda scene, define what counts as success, and create a scripted baseline that demonstrates the task. 
+ 
+ 
+ 
+ Test a few rollouts in the viewer before collecting training data.\\
+
+
+
+ Before choosing a task motion, I’m measuring the real Panda’s home and reachable poses so the objects land where a s
+ cripted demonstration can actually interact with them.
+
+ m testing inverse-kinematic reachability for safe grasp/drop waypoints before wiring in the scene and scripted controller.
+
+
+ he free ball now loads with nq=16, and its keyframe starts exactly on the stand. I’m wiring environment reset to restore the ball, adding a measurable settled-in-cup success predicate, and making gripper control selectable while preserving “open” as the default for existing scripts.
+
+ he scene now has a dynamic ball, an open cup, and a pedestal; reset returns the ball to the start and explicit gripper commands work while legacy calls still default open. I’m adding a standalone IK-driven pick/place baseline with a settled-inside success check, keeping it separate from the generic smoke-test collector.
