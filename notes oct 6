@@ -57,3 +57,34 @@ Implemented in the local clone at ~/Special-topics-dev: the sphere placeholder i
 Validation passed for model loading (67 meshes), environment stepping, short data collection, and a 50-step rendered rollout with nonblank Panda frames. The earlier exit 139 did not recur; MuJoCo did log an NV-GLX warning. Compile and diff checks passed.
 
 Two caveats: importing PyTorch currently segfaults in this venv, so training and checkpoint evaluation remain unverified. Some older “PD baseline” wording remains in the README and Phase 2 plan heading; the torque-later note is present, but my docs cleanup hit patch-context errors. Should I make a docs-only cleanup pass?
+
+The docs cleanup is complete in ~/Special-topics-dev: the README and plan now consistently describe position-servo demonstrations, actuator effort, and torque actuation as a later phase with a separate dataset. I also corrected the plan’s verification step and the evaluator’s module description.
+
+git diff --check passes, and the targeted search found no stale “PD baseline” wording. I did not touch panda.xml or address the latest 500-step viewer exit 139; this was a docs-only pass.
+
+
+
+
+fix mporting PyTorch currently segfaults in this venv
+he earlier evidence is mixed: this .venv reported a CUDA-enabled Torch build, but a prior combined import succeeded while isolated imports later crashed. I’m reproducing the import and checking GPU/driver availability and installed wheel metadata before choosing between a CPU wheel, a CUDA fix, or a library conflict.
+
+he backtrace lands inside Torch’s own JIT/pybind11 initializer, and masking the GPU has no effect; this is not a missing CUDA driver. I’ll replace the Torch/TorchVision binaries with the matching official CUDA 12.1 wheels in this project venv, then verify import and GPU detection.
+he backtrace lands inside Torch’s own JIT/pybind11 initializer, and masking the GPU has no effect; this is not a missing CUDA driver. I’ll replace the Torch/TorchVision binaries with the matching official CUDA 12.1 wheels in this project venv, then verify import and GPU detection.
+The new terminal opened in amy, so .venv pointed to the wrong environment. Torch is working in the project venv: importing python reports 2.1.0+cu121 and CUDA available: True. No reinstall is needed.
+
+In each new terminal, run:
+
+cd ~/Special-topics-dev/mujoco_force_control
+source .venv/bin/activatePYTHONPATH=.. python scripts/collect_data.py --num_rollouts 10 --output_dir dataset/test
+
+
+raining is reaching the model now; the failure is a feature-size mismatch: the environment supplies 17 proprioceptive values, but the encoder expects 16. I’ll trace the model and inference feature construction, then
+ align the shared contract and run a focused forward/training chec
+
+
+
+ The one-trial evaluation now completes with the trained checkpoint, confirming both the 17-value proprio input and channel-first image path. The 3-epoch model is still weak (RMSE ratio 5.75×); that’s expected for a smoke-te
+ t training run, and I’m doing a final syntax/diff check.
+
+ Your exact 3-epoch CUDA training run now completes and saves checkpoints/test/pi05_best.pt. One-trial checkpoint evaluation also completes. Its RMSE is still high after only three epochs, so treat this run as a pipeline smoke test,
+ not a performance result. Syntax and diff checks pass.
