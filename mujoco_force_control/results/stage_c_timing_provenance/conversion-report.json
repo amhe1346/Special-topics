@@ -1,0 +1,58 @@
+{
+  "dataset": "results/stage_c_timing_provenance",
+  "split": "train",
+  "replay_provenance": {
+    "mujoco_version": "3.14.0",
+    "scene_assets_sha256": "45c77d92a4baf2ee02de3e84dd71d3c49d9c2094a0489faa079eb54219e8f8f2"
+  },
+  "rollout_config": {
+    "timeout_s": 6.0,
+    "max_joint_speed_rad_s": 0.1,
+    "max_inference_s": 5.0,
+    "frequency_hz": 15.0,
+    "no_contact": false
+  },
+  "termination_rules_applied": false,
+  "refine_iterations": 0,
+  "results": [
+    {
+      "seed": 0,
+      "intervals": 135,
+      "max_joint_error_rad": 0.0018246163131858673,
+      "p95_joint_error_rad": 0.0009694292639845781,
+      "max_tip_error_m": 0.0004407760199644103,
+      "p95_tip_error_m": 0.0001296581603186004,
+      "clipped_intervals": 0,
+      "peak_replay_contact_n": 1.6333573875302958,
+      "replay_intervals_over_5n": 0,
+      "reference_replay_max_joint_error_rad": 0.0,
+      "reference_replay_max_tip_error_m": 0.0
+    },
+    {
+      "seed": 1,
+      "intervals": 139,
+      "max_joint_error_rad": 0.0019829998169649254,
+      "p95_joint_error_rad": 0.0010194102770305189,
+      "max_tip_error_m": 0.0006177412073066772,
+      "p95_tip_error_m": 0.0001248526415328778,
+      "clipped_intervals": 0,
+      "peak_replay_contact_n": 1.8074639725820427,
+      "replay_intervals_over_5n": 0,
+      "reference_replay_max_joint_error_rad": 0.0,
+      "reference_replay_max_tip_error_m": 0.0
+    },
+    {
+      "seed": 2,
+      "intervals": 138,
+      "max_joint_error_rad": 0.0020689392266801665,
+      "p95_joint_error_rad": 0.0010262676528639547,
+      "max_tip_error_m": 0.0006397577143214949,
+      "p95_tip_error_m": 0.00015277431165891937,
+      "clipped_intervals": 0,
+      "peak_replay_contact_n": 1.7936421196918368,
+      "replay_intervals_over_5n": 0,
+      "reference_replay_max_joint_error_rad": 0.0,
+      "reference_replay_max_tip_error_m": 0.0
+    }
+  ]
+}
