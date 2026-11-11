@@ -1,0 +1,44 @@
+Yes, the surgical robotics simulator does have sensors
+Based on my exploration of the codebase, here's what sensors are available in the AMBF Surgical Robotics Challenge simulator:
+
+Built-in Sensors:
+Joint Position & Velocity Sensors (all 6 PSM joints)
+
+measured_jp() — reads joint positions for the 6 main degrees of freedom
+measured_jv() — reads joint velocities
+Accessible through the PSM arm class (psm_arm.py)
+End-Effector Pose Sensors
+
+measured_cp() — measures tool tip position and orientation (Cartesian pose)
+Forward kinematics computed from joint positions
+Jaw/Gripper Angle Sensor
+
+get_jaw_angle() — reads the gripper opening angle
+Used for grasping tasks
+Contact Sensors
+
+The simulator was updated (v2.0.0, 2024) to implement "a grasping algorithm using contact sensors"
+These are used for grasp detection and manipulation
+Camera System (Stereo Vision)
+
+Dual camera setup (left/right) defined in world_stereo.yaml
+640×480 RGB image resolution
+Depth camera support (also 640×480)
+Can publish scene images and depth data (PointCloud2)
+Camera feeds are available through ROS topics
+State Available Through API:
+Robot joint/Cartesian state
+Needle position and orientation
+Task completion metrics
+Simulation time and synchronization
+These sensors expose the fundamental data needed for control, learning, and evaluation of surgical manipulation tasks like needle grasping and suturing.
+
+
+
+- gripper 
+Each gripper (left and right fingers) has an invisible ghost body that acts as a contact sensor:
+Key Points
+✅ Contact-based detection — no explicit force sensor, but collision detection
+✅ Both finger sensors — left and right fingers report sensed objects independently
+✅ Automatic grasp logic — built-in run_grasp_logic() handles the detection/grasping automatically
+✅ Graspable objects — can detect Needle, Thread, Puzzle pieces, and blocks

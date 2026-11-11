@@ -14,7 +14,7 @@ DEFAULT_KD = 45.0
 
 
 class PDPositionController:
-    """Apply saturated PD torque commands from named joint position/velocity sensors."""
+    """Apply saturated PD torque commands and read actuator-force feedback."""
 
     def __init__(
         self,
@@ -49,6 +49,7 @@ class PDPositionController:
         for name in self.joint_names:
             env.read_sensor(f"{name}_pos")
             env.read_sensor(f"{name}_vel")
+            env.read_sensor(f"{name}_actuator_force")
 
     def _gain_array(self, gain: float | tuple[float, ...], name: str) -> np.ndarray:
         values = np.asarray(gain, dtype=float)
@@ -84,19 +85,59 @@ class PDPositionController:
         )
         return positions, velocities
 
-    def step(self, target_position: np.ndarray) -> np.ndarray:
-        """Compute and apply one saturated PD torque command."""
-        target = np.asarray(target_position, dtype=float)
-        if target.shape != (len(self.joint_names),):
-            raise ValueError(f"target_position must have shape ({len(self.joint_names)},)")
-        if not np.all(np.isfinite(target)):
-            raise ValueError("target_position must contain only finite values")
+    def read_actuator_forces(self) -> np.ndarray:
+        """Read actuator forces in actuator coordinates from named force sensors."""
+        return np.array(
+            [
+                self.env.read_sensor(f"{name}_actuator_force")[0]
+                for name in self.joint_names
+            ]
+        )
 
-        positions, velocities = self.read_joint_state()
-        joint_torques = self.kp * (target - positions) - self.kd * velocities
-        if self.gravity_compensation:
-            joint_torques += self.env.data.qfrc_bias[self.dof_indices]
+    def read_joint_torques(self) -> np.ndarray:
+        """Convert measured actuator forces to joint-space torques."""
+        return self.read_actuator_forces() * self.actuator_gears
 
+    def check_torque_limits(
+        self, joint_torques: np.ndarray | None = None, tolerance: float = 1e-6
+    ) -> None:
+        """Raise if measured or supplied joint torques exceed actuator force limits."""
+        torques = (
+            self.read_joint_torques()
+            if joint_torques is None
+            else np.asarray(joint_torques, dtype=float)
+        )
+        if torques.shape != (len(self.joint_names),):
+            raise ValueError(f"joint_torques must have shape ({len(self.joint_names)},)")
+        if not np.all(np.isfinite(torques)):
+            raise ValueError("joint_torques must contain only finite values")
+        if not np.isfinite(tolerance) or tolerance < 0:
+            raise ValueError("tolerance must be finite and non-negative")
+
+        force_limits = self.env.model.actuator_forcerange[self.actuator_ids]
+        torque_limits = force_limits * self.actuator_gears[:, np.newaxis]
+        lower_limits = np.minimum(torque_limits[:, 0], torque_limits[:, 1])
+        upper_limits = np.maximum(torque_limits[:, 0], torque_limits[:, 1])
+        force_limited = self.env.model.actuator_forcelimited[self.actuator_ids]
+        violations = force_limited & (
+            (torques < lower_limits - tolerance)
+            | (torques > upper_limits + tolerance)
+        )
+        if np.any(violations):
+            details = ", ".join(
+                f"{self.joint_names[index]}={torques[index]:.6g} "
+                f"(allowed {lower_limits[index]:.6g}..{upper_limits[index]:.6g})"
+                for index in np.flatnonzero(violations)
+            )
+            raise RuntimeError(f"Joint torque limit exceeded: {details}")
+
+    def apply_joint_torques(self, joint_torques: np.ndarray) -> np.ndarray:
+        """Apply saturated joint-space torques and return the applied values."""
+        joint_torques = np.asarray(joint_torques, dtype=float)
+        if joint_torques.shape != (len(self.joint_names),):
+            raise ValueError(f"joint_torques must have shape ({len(self.joint_names)},)")
+        if not np.all(np.isfinite(joint_torques)):
+            raise ValueError("joint_torques must contain only finite values")
         controls = joint_torques / self.actuator_gears
         for control_index, actuator_id in enumerate(self.actuator_ids):
             if self.env.model.actuator_ctrllimited[actuator_id]:
@@ -112,3 +153,17 @@ class PDPositionController:
 
         self.env.data.ctrl[self.actuator_ids] = controls
         return controls * self.actuator_gears
+
+    def step(self, target_position: np.ndarray) -> np.ndarray:
+        """Compute and apply one saturated PD torque command."""
+        target = np.asarray(target_position, dtype=float)
+        if target.shape != (len(self.joint_names),):
+            raise ValueError(f"target_position must have shape ({len(self.joint_names)},)")
+        if not np.all(np.isfinite(target)):
+            raise ValueError("target_position must contain only finite values")
+
+        positions, velocities = self.read_joint_state()
+        joint_torques = self.kp * (target - positions) - self.kd * velocities
+        if self.gravity_compensation:
+            joint_torques += self.env.data.qfrc_bias[self.dof_indices]
+        return self.apply_joint_torques(joint_torques)

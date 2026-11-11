@@ -22,6 +22,11 @@ def run_demo(
     kp: float = DEFAULT_KP,
     kd: float = DEFAULT_KD,
 ) -> tuple[np.ndarray, ...]:
+    if trajectory not in ("step", "sine"):
+        raise ValueError("trajectory must be 'step' or 'sine'")
+    if not np.isfinite(duration) or duration <= 0:
+        raise ValueError("duration must be finite and positive")
+
     env = BaseEnv()
     env.reset("home")
     controller = PDPositionController(env, kp=kp, kd=kd)
