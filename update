@@ -1,0 +1,142 @@
+Project status — 10 November 2026
+
+The project is a simulation-first peg-in-hole benchmark for studying
+force-aware residual control around a fixed pi0.5 policy. Stages A and B have
+working prototypes but are not fully validated; Stage C is in progress.
+Residual-policy training and real-robot evaluation have not been completed.
+
+Working
+- MuJoCo Panda simulation with joint control, torque feedback and observers,
+  wrist force sensing, and classical force/compliance controllers.
+- Peg, gripper, table, hole and cameras; insertion, seating, force, drop,
+  workspace and timeout checks. Trials start with the peg already grasped.
+- pi0.5-DROID observation/action adapters and guarded simulation rollouts.
+- Classical demonstration and policy-failure recording, including
+  physics-step controls and replay states linked to camera samples.
+
+Verified
+- On 10 held-out simulation seeds, position, hybrid and impedance baselines
+  succeeded in 8, 10 and 9 trials respectively. These small samples do not
+  establish comparative performance.
+- The real pi0.5 checkpoint ran locally in simulation; one recorded contact
+  trial ended in a dropped peg, not a successful insertion.
+- A five-trial classical pilot recorded three training successes, one
+  validation timeout and one test success. Replaying recorded controls
+  reproduced the sampled endpoints in the tested simulator.
+- Motion-derived imitation actions were not accurate enough: training-trial
+  95th-percentile peg-tip errors were 0.125–0.153 mm, above the nominal
+  0.08 mm radial clearance. No imitation baseline has been trained.
+
+
+    The classical controller and π0.5 use different kinds of actions:
+
+The classical controller applies actuator controls to move the arm.
+π0.5 outputs normalized joint-velocity commands.
+
+- The most recent full test run passed 101 tests with one skipped; the
+  optional OpenPI client environment passed 27 focused tests.
+
+Still needed
+- Finalize task protocol, simulation geometry/contact and benchmark
+  validation; gather a larger, representative dataset.
+- Validate a suitable classical-to-policy action mapping with continuous,
+  held-out rollouts; define complete training-only normalization and train
+  the initial imitation baseline.
+- Verify checkpoint weight terms, then implement and evaluate the residual
+  policy and its force-observation/reward ablations.
+- Before any hardware use, independently validate sensing, timing, controls
+  and safety. The simulation's 5 N force stop is checked after a physics
+  step, so it is not a force cap; real-robot testing remains deferred.
+
+See mujoco_force_control/README.md for commands, data contracts and limits,
+and thoughts for the research plan.
+
+Running on the CU Boulder Alpine cluster
+
+Alpine can run simulation trials now and GPU training once the training code
+and validated action labels exist. An active CURC account and Alpine
+allocation are required. Log in and select the Alpine scheduler:
+
+  ssh YOUR_USERNAME@login.rc.colorado.edu
+  module load slurm/alpine
+
+After committing and pushing the project, clone it on Alpine:
+
+  git clone https://github.com/amhe1346/Special-topics.git
+  cd Special-topics/mujoco_force_control
+
+Authenticate if the repository is private. Create Python environments on
+Alpine rather than copying local environments; use `module avail python` to
+find an available Python module. Following CURC's installation guidance, use
+an appropriate compute-node allocation to install project dependencies:
+
+  python3 -m venv .venv
+  .venv/bin/python -m pip install -r requirements.txt
+
+Do not run substantial computations on login nodes. For an initial CPU
+benchmark, create `sim.sbatch` in mujoco_force_control, replace
+YOUR_ALLOCATION with your actual allocation, and submit it from that directory:
+
+  #!/bin/bash
+  #SBATCH --job-name=peg-sim
+  #SBATCH --account=YOUR_ALLOCATION
+  #SBATCH --partition=acpu
+  #SBATCH --qos=cpu-normal
+  #SBATCH --nodes=1
+  #SBATCH --ntasks=1
+  #SBATCH --cpus-per-task=1
+  #SBATCH --mem=4G
+  #SBATCH --time=01:00:00
+  #SBATCH --output=peg-sim-%j.log
+
+  set -euo pipefail
+  cd "$SLURM_SUBMIT_DIR"
+  export OMP_NUM_THREADS=1
+  export OPENBLAS_NUM_THREADS=1
+  .venv/bin/python benchmark_insertion.py \
+    --method all --trials 3 --seed 0 > "simulation-${SLURM_JOB_ID}.jsonl"
+
+  module load slurm/alpine
+  sbatch sim.sbatch
+  squeue -u "$USER"
+
+The script writes trial summaries as JSONL and Slurm output to a log file.
+The resource request is an unmeasured starting point. For larger batches,
+use Slurm job arrays with distinct seeds and output paths.
+
+Camera recording requires a working headless renderer. Test this command
+inside an NVIDIA GPU allocation; the output directory must not already exist:
+
+  MUJOCO_GL=egl .venv/bin/python collect_stage_c.py \
+    --output "results/alpine-pilot-${SLURM_JOB_ID}"
+
+EGL support depends on the node's graphics and driver environment. The
+collector currently uses a fixed five-trial split, so running multiple
+identical jobs does not produce new seed ranges.
+
+An example GPU request, subject to allocation access and availability:
+
+  #SBATCH --account=YOUR_ALLOCATION
+  #SBATCH --partition=aa100
+  #SBATCH --qos=gpu-normal
+  #SBATCH --gres=gpu:a100-40gb:1
+  #SBATCH --cpus-per-task=4
+  #SBATCH --mem=32G
+  #SBATCH --time=02:00:00
+
+The local pi0.5 inference run used roughly 20 GB of GPU memory; a 40 GB GPU
+is a starting point, not a training guarantee. The official OpenPI server and
+client require separate environments; see the project README. Run both on the
+same allocated node with the server bound to localhost. Use suitable
+project/scratch storage for checkpoints and datasets, observe CURC quotas and
+retention policies, and back up important outputs.
+
+Before GPU training, validate the action conversion on held-out continuous
+rollouts, implement the imitation/residual training and ablations, define
+normalization and checkpointing, and verify checkpoint weight terms.
+
+CURC references:
+  https://curc.readthedocs.io/en/latest/clusters/alpine/quick-start.html
+  https://curc.readthedocs.io/en/latest/running-jobs/job-resources.html
+  https://curc.readthedocs.io/en/latest/running-jobs/job-arrays.html
+  https://curc.readthedocs.io/en/latest/clusters/alpine/alpine-hardware.html
