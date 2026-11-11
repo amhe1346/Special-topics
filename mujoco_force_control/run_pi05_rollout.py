@@ -10,6 +10,7 @@ import numpy as np
 
 from collect_stage_c import Recorder
 from envs.peg_in_hole import PegInHoleEnv
+from integrations.replay_provenance import replay_provenance
 from integrations.rollout import RolloutConfig, run_rollout
 from run_pi05_preview import LocalOpenPiPolicy
 
@@ -35,8 +36,9 @@ def main() -> None:
         timeout_s=args.timeout_s, max_inference_s=args.max_inference_s,
         no_contact=not args.allow_contact,
     )
-    metadata = {"schema": "stage-c-development-v1", "source": "pi05_droid",
-                "seed": args.seed, "config": asdict(config), "status": "in_progress"}
+    metadata = {"schema": "stage-c-development-v2", "source": "pi05_droid",
+                "seed": args.seed, "config": asdict(config), "status": "in_progress",
+                "replay_provenance": replay_provenance()}
     if args.output is not None:
         (args.output / "manifest.json").write_text(json.dumps(metadata, indent=2, allow_nan=False) + "\n")
     policy = None
@@ -55,9 +57,8 @@ def main() -> None:
         if recorder is not None:
             recorder.close()
         if args.output is not None:
-            if recorder is not None and recorder.rows:
-                arrays = {key: np.asarray([row[key] for row in recorder.rows]) for key in recorder.rows[0]}
-                np.savez_compressed(args.output / "samples.npz", **arrays)
+            if recorder is not None:
+                recorder.save(args.output / "samples.npz", args.output / "steps.npz")
             if observations:
                 requests = [observation.request() for observation in observations]
                 np.savez_compressed(

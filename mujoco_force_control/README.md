@@ -529,15 +529,25 @@ error. Successful completion writes training-only joint-position mean and
 standard deviation. Other fields are not normalized, and no standard-deviation
 floor or normalization transform is provided.
 
-The per-trial NPZ samples are approximately 10 Hz post-step captures: two RGB
-views, joint positions and velocities, gripper fraction, raw local wrist
-wrench, peg/fixture contact force, actuator controls, geometry and a
-depth-based phase label. Each control drove the immediately preceding physics
-step; intermediate controls are not recorded. The wrist wrench includes
-gravity and inertia, not just contact. The phase is a heuristic, and the
-outcome is per trial. These classical actuator controls are **not** DROID
-normalized velocity actions and are not directly suitable as pi0.5 training
-targets.
+The `stage-c-development-v2` classical collector saves approximately 15 Hz
+post-step camera/state samples and a separate `*-steps.npz` with every physics
+step (currently 500 Hz). Each sample's `step_index` indexes the same-time
+step. Step records include post-step simulation time, start time of the
+preceding control interval, joint positions/velocities, full MuJoCo
+`mjSTATE_INTEGRATION`, actuator controls and forces, raw local wrench and
+peg/fixture contact force. The control is the input held over the immediately
+preceding step; actuator force and sensors are evaluated at the post-step
+state. The sample also contains the two RGB views, gripper fraction, hand
+pose, peg/hole geometry and a depth-based phase label. The wrist wrench
+includes gravity and inertia, not just contact. Phase is a heuristic and
+outcome is per trial; the final valid step may precede an invalid-state
+termination. Timing is simulation time, not wall-clock sensor timing.
+
+The manifest records the MuJoCo version and a hash of the scene definition
+and Panda assets to catch incompatible replay. It is not a full archive of
+all dependencies or controller code. Older v1 datasets lack full-rate records;
+they cannot be upgraded by interpolation. These classical actuator controls
+are **not** DROID normalized velocity actions and are not training targets.
 
 Recorded pi0.5 trials additionally save `observations.npz` with the exact
 preprocessed policy-input images and state at inference times. The manifest
@@ -548,7 +558,43 @@ Observations may outnumber decisions if inference times out or fails. The
 10 Hz post-step samples and inference observations have different cadences;
 join by simulation timestamp, not array index. Exceptions produce an error
 manifest and are re-raised; a process interruption can leave an in-progress
-manifest or partial files.
+manifest or partial files. New v2 pi0.5 recordings also include `steps.npz`
+at physics rate; earlier v1 files do not.
+
+### Evaluating imitation-label conversion
+
+The tentative conversion derives a normalized joint action from *achieved*
+motion: `(q_next - q_now) / (elapsed_seconds * 15 * 0.2)`. It uses future
+state as an offline label, never as an online observation. It is not the
+controller's commanded velocity. The validation tool restores each recorded
+integration state independently and compares (1) replaying the recorded
+per-step controls and (2) applying the converted command through the same
+bounded joint-target/PD adapter as the pi0.5 rollout:
+
+```sh
+python3 validate_stage_c_conversion.py results/my_classical_pilot \
+  --split train --output results/my_classical_pilot/conversion.json
+```
+
+`--refine-iterations 3` additionally tries fitting each bounded target using
+the future endpoint and repeated local simulation. It is a diagnostic
+experiment, not a trained policy, and cannot be used online. The report
+includes joint and peg-tip endpoint errors, clipped intervals, and peak
+replay force. This independent one-interval replay is not a continuous
+closed-loop success or safety test; it does not apply episode termination
+rules. Validate on held-out trials and full episodes before accepting labels.
+
+On the three training trials in `results/stage_c_timing_provenance`, replay of
+recorded controls reproduced both joint positions and peg tips exactly at
+sample times. Direct converted labels had per-trial 95th-percentile tip errors
+of 0.125–0.153 mm and maximum errors of 0.441–0.640 mm. Three refinement
+iterations on the equivalent `results/stage_c_timing_pilot` trials reduced
+the 95th percentiles to 0.043–0.100 mm, but maxima remained 0.258–0.364 mm
+and four intervals hit bounds. This earlier dataset predates the provenance
+check and cannot be passed to the current validation CLI. These errors are significant
+relative to the nominal 0.08 mm radial clearance. Consequently neither
+conversion is validated for imitation and **no imitation baseline has been
+trained**; more accurate labels and continuous held-out replay are needed.
 
 One local development collection (`results/stage_c_development_v3`) produced
 three training successes, one validation timeout and one test success; it has

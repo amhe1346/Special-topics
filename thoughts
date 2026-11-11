@@ -291,6 +291,12 @@ validate hardware safety or establish comparative performance.
   are not DROID actions. Weight-specific license terms, a representative
   dataset, action conversion, and complete normalization remain unresolved.
   See the project README for the data contract and limitations.
+- The v2 recorder additionally captures every physics-step input and replay
+  state, linked to approximately 15 Hz camera samples. Direct conversion of
+  observed joint motion to DROID-like commands and a bounded replay-fitted
+  alternative were tested; both have substantial peg-tip reconstruction
+  errors relative to 0.08 mm clearance. Do not train the planned imitation
+  baseline until conversion and continuous held-out replay are validated.
 - Implement and test camera/state preprocessing and action postprocessing.
 - Verify inference timing and safe low-level action execution on the intended
   robot without contact, then in guarded low-risk contact trials.

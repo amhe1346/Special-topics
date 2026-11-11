@@ -183,7 +183,7 @@ def run_trial(
         else:
             impedance.step(nominal, rotation)
         reason = episode.step()
-        if on_step is not None:
+        if on_step is not None and reason != "invalid_state":
             on_step(env)
         if reason == "invalid_state":
             break
