@@ -1,0 +1,224 @@
+{
+  "schema": "stage-c-oracle-lerobot-v1",
+  "status": "complete",
+  "source": "/home/amy/Downloads/Special-topics/mujoco_force_control/results/stage_c_oracle_v2",
+  "source_manifest_sha256": "af2565c09b8b1e194cbe722d6428f1bd66266b82ee9eb33d04b9295930d839ef",
+  "fps": 15,
+  "action_feature": "7 normalized DROID joint velocities + 1 normalized gripper position (0=open, 1=closed)",
+  "joint_delta_scale_rad": 0.2,
+  "action_horizon": 16,
+  "split_datasets": {
+    "train": {
+      "repo_id": "special_topics/peg_in_hole_oracle_train",
+      "path": "/home/amy/Downloads/Special-topics/mujoco_force_control/results/stage_c_oracle_lerobot/train",
+      "trial_count": 20,
+      "sample_count": 1641,
+      "trials": [
+        {
+          "seed": 0,
+          "file": "train-0.npz",
+          "sha256": "b39a94dee2f99f0d37a5913e48d3a27f980c454d1bcbf1a727f67594ab3f327c",
+          "samples": 82
+        },
+        {
+          "seed": 1,
+          "file": "train-1.npz",
+          "sha256": "010efca2ccbe243d5d28846b50b9a99ef7fdc196374965a173d40c89e2f52664",
+          "samples": 80
+        },
+        {
+          "seed": 2,
+          "file": "train-2.npz",
+          "sha256": "26830db65614bea0ca090295649fdc438ed8abeb21ed569d5acf6984124827c0",
+          "samples": 82
+        },
+        {
+          "seed": 3,
+          "file": "train-3.npz",
+          "sha256": "0f0956349be8ad40341200d46782da0bc32e1213f9ef2cf959948f95f8dc8226",
+          "samples": 82
+        },
+        {
+          "seed": 4,
+          "file": "train-4.npz",
+          "sha256": "67dbf64b3e2d6788ab26596ee733828887f89782e283ca9342637b29eec02adf",
+          "samples": 81
+        },
+        {
+          "seed": 5,
+          "file": "train-5.npz",
+          "sha256": "8ee097510fd03532689496894a3d7bd67579dfd6b821e671adb4895a6987d567",
+          "samples": 80
+        },
+        {
+          "seed": 6,
+          "file": "train-6.npz",
+          "sha256": "86c29a4344845ef58b86ce5fae06b821ec2b407ca6b790b39ab58226d855e078",
+          "samples": 82
+        },
+        {
+          "seed": 7,
+          "file": "train-7.npz",
+          "sha256": "fc8c796c85ffbe815fa5cd16f745e141eebf8aa9b1e2e56348d896f06cce7c58",
+          "samples": 83
+        },
+        {
+          "seed": 8,
+          "file": "train-8.npz",
+          "sha256": "b92986c4c9b7b786dfb882ecc523812628d218a329b97f7966d33c6111e62c6d",
+          "samples": 82
+        },
+        {
+          "seed": 9,
+          "file": "train-9.npz",
+          "sha256": "4ceee773e230ca84f4b6398347064c3f67437d6cf52caf72b5d1f075ea6b92a4",
+          "samples": 83
+        },
+        {
+          "seed": 10,
+          "file": "train-10.npz",
+          "sha256": "32b4c51212093333848058bfee1e971920c54d487dc29b7b03d34f3260bcc4f4",
+          "samples": 83
+        },
+        {
+          "seed": 11,
+          "file": "train-11.npz",
+          "sha256": "5b36dd6be9beb9842e5db853aeefbc322a47687e9ec05e61da05c93b76464ae5",
+          "samples": 81
+        },
+        {
+          "seed": 12,
+          "file": "train-12.npz",
+          "sha256": "5c4f10a8438be5608ee4a75376e6d59ca94f80906849adf42abfa172e4a9f595",
+          "samples": 82
+        },
+        {
+          "seed": 13,
+          "file": "train-13.npz",
+          "sha256": "e11eed7a11584dde2604a3b6b27c50e7c86f60e8e24913e954b237e4132bcc9a",
+          "samples": 82
+        },
+        {
+          "seed": 14,
+          "file": "train-14.npz",
+          "sha256": "484fb9014fcb8a5ecd2a8758aa9a3b9f3bfd76c7f1debf63bb93b71faf9dac47",
+          "samples": 81
+        },
+        {
+          "seed": 15,
+          "file": "train-15.npz",
+          "sha256": "4fa33dc406a548d7121157bbc643e6de15fe4be2352b418d616ad9d64d0930e2",
+          "samples": 84
+        },
+        {
+          "seed": 16,
+          "file": "train-16.npz",
+          "sha256": "dc35deb9701613fc22dc4ebc3d241a1df7259222d1f80157e77fe324611f0d82",
+          "samples": 82
+        },
+        {
+          "seed": 17,
+          "file": "train-17.npz",
+          "sha256": "f11fd5d82237e0cdb069b799feefb124cca6cf781e3cc4a3e63e6ca3af969299",
+          "samples": 82
+        },
+        {
+          "seed": 18,
+          "file": "train-18.npz",
+          "sha256": "8ec9709025ce629d40b5a2165493f55fca18a410a295853485afe67a356873ad",
+          "samples": 82
+        },
+        {
+          "seed": 19,
+          "file": "train-19.npz",
+          "sha256": "3f42f9d6571242a8ba65dac925f63d3c012618081e3dd6e7bfe7a85ae1713232",
+          "samples": 85
+        }
+      ]
+    },
+    "validation": {
+      "repo_id": "special_topics/peg_in_hole_oracle_validation",
+      "path": "/home/amy/Downloads/Special-topics/mujoco_force_control/results/stage_c_oracle_lerobot/validation",
+      "trial_count": 5,
+      "sample_count": 410,
+      "trials": [
+        {
+          "seed": 100,
+          "file": "validation-100.npz",
+          "sha256": "6447939dd64ad25bb55432d9e7f8e81c87e8103d288fb5585c680d154b13f7cb",
+          "samples": 81
+        },
+        {
+          "seed": 101,
+          "file": "validation-101.npz",
+          "sha256": "7d3fa07e62f043d0cbf25a4ec78a8e358411fd7db74584efd2fafa9d288947e1",
+          "samples": 83
+        },
+        {
+          "seed": 102,
+          "file": "validation-102.npz",
+          "sha256": "38b5386f8726c134a8fdba232f56eaed0e13e5626e3182c63a42b94d0aea54cd",
+          "samples": 83
+        },
+        {
+          "seed": 103,
+          "file": "validation-103.npz",
+          "sha256": "e3f9c6292259bef30aabb47e3843428893d4b71f66de841d0e2fddfbbe28c2b7",
+          "samples": 82
+        },
+        {
+          "seed": 104,
+          "file": "validation-104.npz",
+          "sha256": "acc0d6f12b31179d9537420eac38fbc561b3279e604e37d27a40897248fb7749",
+          "samples": 81
+        }
+      ]
+    },
+    "test": {
+      "repo_id": "special_topics/peg_in_hole_oracle_test",
+      "path": "/home/amy/Downloads/Special-topics/mujoco_force_control/results/stage_c_oracle_lerobot/test",
+      "trial_count": 5,
+      "sample_count": 415,
+      "trials": [
+        {
+          "seed": 200,
+          "file": "test-200.npz",
+          "sha256": "9ebdaa2001c59b84bb59fc11bab1b9914874dfec6c0496ed70259ee4433e9e98",
+          "samples": 86
+        },
+        {
+          "seed": 201,
+          "file": "test-201.npz",
+          "sha256": "b00c2dda78e29bd9a176d21b5a09484d217bba85a2b4d29ec7346487eba364d6",
+          "samples": 84
+        },
+        {
+          "seed": 202,
+          "file": "test-202.npz",
+          "sha256": "1624835d7692187c7a970213f406de48f4078d6163658f53e0ab20d0a076eb7e",
+          "samples": 82
+        },
+        {
+          "seed": 203,
+          "file": "test-203.npz",
+          "sha256": "26f87058b101fc4299348ea5af0a91f4b04cd8ec66ff699f0a74a3e0a5ccc23d",
+          "samples": 81
+        },
+        {
+          "seed": 204,
+          "file": "test-204.npz",
+          "sha256": "32186f5c92eb128b6c54ef4826afbfc80a067017870e233879e2f0012d6f7908",
+          "samples": 82
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Synthetic MuJoCo oracle demonstrations, not physical robot demonstrations.",
+    "Normalized joint action uses the pinned DROID 0.2-radian-per-command mapping and the local rollout speed limit; gripper position uses DROID convention 0=open, 1=closed.",
+    "The second external-camera feature is a black placeholder; the pinned DroidInputs transform consumes external camera 1 and the wrist camera.",
+    "OpenPI fine-tuning must reuse the pi05_droid checkpoint DROID normalization assets.",
+    "Action horizon 16 is set by the pinned OpenPI custom fine-tuning config; it is distinct from the inference checkpoint's 15-step horizon."
+  ],
+  "lerobot_version": "0.1.0"
+}

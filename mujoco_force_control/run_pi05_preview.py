@@ -40,7 +40,10 @@ class LocalOpenPiPolicy:
                         open_timeout=5, close_timeout=2)
             )
             metadata = self.connection.recv(timeout=30)
-            if not isinstance(metadata, bytes) or not isinstance(self.msgpack.unpackb(metadata), dict):
+            if not isinstance(metadata, bytes):
+                raise ValueError("OpenPI server returned invalid metadata")
+            self.metadata = self.msgpack.unpackb(metadata)
+            if not isinstance(self.metadata, dict):
                 raise ValueError("OpenPI server returned invalid metadata")
             self._connection_context = stack.pop_all()
 

@@ -21,6 +21,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--timeout-s", type=float, default=6.0)
     parser.add_argument("--max-inference-s", type=float, default=5.0)
+    parser.add_argument(
+        "--open-loop-horizon", type=int, default=8,
+        help="actions to execute from each predicted chunk before re-querying (max 15)",
+    )
     parser.add_argument("--allow-contact", action="store_true", help="permit guarded simulation contact")
     parser.add_argument("--output", type=Path, help="new directory for recorded simulation trial")
     args = parser.parse_args()
@@ -34,7 +38,7 @@ def main() -> None:
     observations = []
     config = RolloutConfig(
         timeout_s=args.timeout_s, max_inference_s=args.max_inference_s,
-        no_contact=not args.allow_contact,
+        open_loop_horizon=args.open_loop_horizon, no_contact=not args.allow_contact,
     )
     metadata = {"schema": "stage-c-development-v2", "source": "pi05_droid",
                 "seed": args.seed, "config": asdict(config), "status": "in_progress",

@@ -4,10 +4,12 @@ import mujoco
 import numpy as np
 import pytest
 
+from collect_scripted_teacher import _action_chunks
 from collect_stage_c import Recorder, collect
 from controllers.pd_position_controller import PDPositionController
 from envs.peg_in_hole import PegInHoleEnv
 from integrations.rollout import RolloutConfig, run_rollout
+from integrations.scripted_teacher import ScriptedInsertionTeacher
 from validate_stage_c_conversion import evaluate_trial, motion_action
 
 
@@ -37,14 +39,117 @@ class Policy:
         return {"actions": result}
 
 
+def test_inference_timing_summary_handles_empty_and_deadline_misses():
+    from integrations.rollout import _inference_timing_summary
+
+    empty = _inference_timing_summary([], 15.0)
+    assert empty["calls"] == 0
+    assert empty["deadline_miss_rate"] is None
+    result = _inference_timing_summary([0.01, 0.08, 0.1], 15.0)
+    assert result["calls"] == 3
+    assert result["deadline_misses"] == 2
+    assert result["deadline_miss_rate"] == pytest.approx(2 / 3)
+    assert result["p50_s"] == pytest.approx(0.08)
+    assert result["max_s"] == pytest.approx(0.1)
+
+
 def test_rollout_simulation_only_bounded_speed_and_timeout():
     env = PegInHoleEnv()
-    result = run_rollout(env, Renderer(), Policy(1.0), RolloutConfig(timeout_s=0.2))
+    result = run_rollout(
+        env, Renderer(), Policy(1.0),
+        RolloutConfig(timeout_s=0.2, open_loop_horizon=1),
+    )
     assert result["reason"] == "timeout"
     assert result["fixture_unchanged"]
     assert result["sim_time_s"] == pytest.approx(0.2)
     assert len(result["inference_s"]) == 3
     assert result["steps"] == 100
+    timing = result["inference_timing"]
+    assert timing["calls"] == 3
+    assert timing["control_period_s"] == pytest.approx(1 / 15)
+    assert timing["inference_budget_s"] == pytest.approx(1 / 15)
+    assert timing["deadline_misses"] == sum(value > 1 / 15 for value in result["inference_s"])
+    assert result["action_steps"] == 3
+
+
+def test_rollout_executes_droid_action_chunk_before_replanning():
+    env = PegInHoleEnv()
+    observations = []
+    result = run_rollout(
+        env,
+        Renderer(),
+        Policy(0.1),
+        RolloutConfig(timeout_s=0.6, no_contact=False),
+        on_observation=observations.append,
+    )
+    assert result["reason"] == "timeout"
+    assert result["inference_timing"]["open_loop_horizon"] == 8
+    assert result["inference_timing"]["inference_budget_s"] == pytest.approx(8 / 15)
+    assert len(result["decisions"]) == 2
+    assert len(observations) == 2
+    assert [len(decision["executed_actions"]) for decision in result["decisions"]] == [8, 1]
+    assert result["action_steps"] == 9
+
+
+def test_rollout_config_rejects_invalid_chunk_horizon():
+    with pytest.raises(ValueError, match="open_loop_horizon"):
+        RolloutConfig(open_loop_horizon=16)
+
+
+@pytest.mark.parametrize("seed", [0, 4, 9])
+def test_scripted_teacher_success_and_executed_action_labels(seed):
+    env = PegInHoleEnv()
+    env.reset(seed=seed, lateral_range=0.00005)
+    random = np.random.default_rng(np.random.SeedSequence([seed, 1]))
+    tilt = random.uniform(-0.03, 0.03, 2)
+    angle = float(np.deg2rad(np.linalg.norm(tilt)))
+    if angle:
+        quat = np.empty(4)
+        mujoco.mju_axisAngle2Quat(
+            quat, np.array([tilt[0], tilt[1], 0.0]) / np.linalg.norm(tilt), angle
+        )
+        env.data.mocap_quat[env.fixture_mocap_id] = quat
+        mujoco.mj_forward(env.model, env.data)
+
+    observations = []
+    config = RolloutConfig(timeout_s=12.0, no_contact=False, open_loop_horizon=1)
+    result = run_rollout(
+        env,
+        Renderer(),
+        ScriptedInsertionTeacher(env),
+        config,
+        on_observation=observations.append,
+    )
+
+    geometry = env.measure_geometry()
+    assert result["reason"] == "success"
+    assert 0.020 <= geometry.depth <= 0.025
+    assert geometry.lateral_error <= 0.00008
+    assert geometry.angular_error <= np.deg2rad(0.2)
+    assert result["peak_force_n"] <= 5.0
+    assert len(observations) == len(result["decisions"])
+    bounds = env.model.jnt_range[
+        [mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_JOINT, f"joint{i}")
+         for i in range(1, 8)]
+    ]
+    max_delta = config.max_joint_speed_rad_s / config.frequency_hz
+    for observation, decision in zip(observations, result["decisions"]):
+        requested = np.asarray(decision["normalized_velocity"]) * 0.2
+        executed = np.clip(requested, -max_delta, max_delta)
+        expected_target = np.clip(
+            observation.joint_position_rad + executed, bounds[:, 0], bounds[:, 1]
+        )
+        np.testing.assert_allclose(decision["joint_target_rad"], expected_target)
+
+
+def test_oracle_action_chunks_are_consecutive_executed_labels():
+    actions = np.arange(18 * 8, dtype=np.float32).reshape(18, 8)
+    chunks = _action_chunks(actions)
+    assert chunks.shape == (4, 15, 8)
+    np.testing.assert_array_equal(chunks[0], actions[:15])
+    np.testing.assert_array_equal(chunks[-1], actions[3:18])
+    with pytest.raises(ValueError, match="at least 15"):
+        _action_chunks(actions[:14])
 
 
 def test_rollout_stops_before_unexpected_release():
@@ -130,7 +235,10 @@ def test_training_only_normalization_and_trial_schema(tmp_path, monkeypatch):
     def fake_trial(method, config, on_step):
         row = dict(time_s=1., exterior_rgb=np.zeros((2, 2, 3), dtype=np.uint8),
                    wrist_rgb=np.zeros((2, 2, 3), dtype=np.uint8),
-                   joint_position_rad=np.full(7, config.seed, dtype=float))
+                   joint_position_rad=np.full(7, config.seed, dtype=float),
+                   joint_velocity_rad_s=np.zeros(7),
+                   gripper_closed_fraction=0.5,
+                   wrench_local=np.zeros(6))
         on_step.rows.append(row)
         on_step.steps.append({"time_s": 1.})
         return {"reason": "success"}
@@ -139,8 +247,11 @@ def test_training_only_normalization_and_trial_schema(tmp_path, monkeypatch):
     path = tmp_path / "data"
     collect(path, {"train": [1, 3], "validation": [20], "test": [30]})
     norm = json.loads((path / "normalization.json").read_text())
-    assert norm["mean"] == [2.0] * 7
-    assert norm["std"] == [1.0] * 7
+    assert norm["source_split"] == "train"
+    assert norm["fields"]["joint_position_rad"]["mean"] == [2.0] * 7
+    assert norm["fields"]["joint_position_rad"]["std"] == [1.0] * 7
+    assert norm["fields"]["wrench_local"]["std"] == [1e-6] * 6
+    assert norm["fields"]["gripper_closed_fraction"]["std"] == 1e-6
     assert norm["training_seeds"] == [1, 3]
     with np.load(path / "validation-20.npz", allow_pickle=False) as trial:
         assert trial["joint_position_rad"][0, 0] == 20

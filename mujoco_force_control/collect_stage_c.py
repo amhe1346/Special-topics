@@ -16,6 +16,14 @@ from integrations.sim_observation import capture_observation
 from sensors.load_cell import EndEffectorLoadCell
 
 
+NORMALIZATION_FIELDS = (
+    "joint_position_rad",
+    "joint_velocity_rad_s",
+    "gripper_closed_fraction",
+    "wrench_local",
+)
+
+
 class Recorder:
     """Capture post-step state and the controls that drove the preceding step."""
 
@@ -93,7 +101,7 @@ class Recorder:
 
 
 def collect(output: Path, seeds: dict[str, list[int]], method: str = "impedance") -> None:
-    """Write trial-separated samples and fit normalization on training trials only."""
+    """Write trial-separated samples and fit feature statistics on training trials only."""
     if set(seeds) != {"train", "validation", "test"}:
         raise ValueError("train, validation and test splits are required")
     all_seeds = [seed for group in seeds.values() for seed in group]
@@ -102,7 +110,7 @@ def collect(output: Path, seeds: dict[str, list[int]], method: str = "impedance"
     if any(not group for group in seeds.values()) or len(set(all_seeds)) != len(all_seeds):
         raise ValueError("splits must be nonempty and have disjoint seeds")
     output.mkdir(parents=True, exist_ok=False)
-    training = []
+    training: dict[str, list[np.ndarray]] = {field: [] for field in NORMALIZATION_FIELDS}
     manifest = {"schema": "stage-c-development-v2", "status": "in_progress",
                 "method": method, "splits": seeds, "trials": [],
                 "replay_provenance": replay_provenance()}
@@ -124,11 +132,26 @@ def collect(output: Path, seeds: dict[str, list[int]], method: str = "impedance"
                                        "steps_file": steps_file, "outcome": result})
             manifest_path.write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")
             if split == "train":
-                training.append(np.asarray([row["joint_position_rad"] for row in recorder.rows]))
-    values = np.concatenate(training)
-    normalization = {"field": "joint_position_rad", "mean": np.mean(values, axis=0).tolist(),
-                     "std": np.std(values, axis=0).tolist(), "training_sample_count": len(values),
-                     "training_seeds": seeds["train"]}
+                for field in NORMALIZATION_FIELDS:
+                    training[field].append(np.asarray([row[field] for row in recorder.rows], dtype=float))
+    normalization = {
+        "schema": "stage-c-feature-normalization-v1",
+        "source_split": "train",
+        "training_seeds": seeds["train"],
+        "std_floor": 1e-6,
+        "fields": {},
+        "note": "Statistics are for downstream dataset use; OpenPI applies its checkpoint transforms at inference.",
+    }
+    for field, groups in training.items():
+        values = np.concatenate(groups, axis=0)
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"training feature {field} contains non-finite values")
+        raw_std = np.std(values, axis=0)
+        normalization["fields"][field] = {
+            "mean": np.mean(values, axis=0).tolist(),
+            "std": np.maximum(raw_std, normalization["std_floor"]).tolist(),
+            "training_sample_count": int(values.shape[0]),
+        }
     (output / "normalization.json").write_text(json.dumps(normalization, indent=2, allow_nan=False) + "\n")
     manifest["status"] = "complete"
     manifest_path.write_text(json.dumps(manifest, indent=2, allow_nan=False) + "\n")

@@ -4,7 +4,14 @@ import pytest
 import threading
 
 from envs.peg_in_hole import PegInHoleEnv
-from integrations.pi05_droid import CHUNK_SHAPE, DroidObservation, infer_preview, preview_actions
+from integrations.pi05_droid import (
+    CHUNK_SHAPE,
+    DROID_MAX_JOINT_DELTA_RAD,
+    DroidObservation,
+    droid_joint_velocity_to_delta,
+    infer_preview,
+    preview_actions,
+)
 from integrations.sim_observation import capture_observation
 from run_pi05_preview import LocalOpenPiPolicy
 
@@ -57,6 +64,17 @@ def test_action_chunk_is_clipped_binary_and_never_executed():
     assert len(result) == 15
     np.testing.assert_allclose(result[0].joint_delta_rad, [0.2, -0.2, 0.1, 0, 0, 0, 0])
     assert result[0].gripper_closed and not result[1].gripper_closed
+
+
+def test_droid_joint_velocity_round_trips_to_per_command_joint_delta():
+    action = np.array([0.03, -0.02, 0.0, 0.01, -0.033, 0.0, 0.005])
+    delta = droid_joint_velocity_to_delta(action)
+    np.testing.assert_allclose(delta, action * DROID_MAX_JOINT_DELTA_RAD)
+    np.testing.assert_allclose(delta / DROID_MAX_JOINT_DELTA_RAD, action)
+    with pytest.raises(ValueError, match=r"\[-1, 1\]"):
+        droid_joint_velocity_to_delta(np.full(7, 1.01))
+    with pytest.raises(ValueError, match="final dimension of 7"):
+        droid_joint_velocity_to_delta(np.zeros(8))
 
 
 @pytest.mark.parametrize("response", [{}, {"actions": np.zeros((1, 8))}, {"actions": np.zeros((10, 8))}, {"actions": np.full(CHUNK_SHAPE, np.nan)}])

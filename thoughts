@@ -127,129 +127,154 @@ communication loss. Do not rely on reward shaping for safety.
 
 ### Stage A: Validate task definitions and protocol
 
-Status: protocol draft; not yet approved for training or real-robot contact.
-The values marked TBD must be decided and recorded before the corresponding
-experiment begins. Existing MuJoCo controller limits are not an independent
-real-robot safety system.
+Status: approved for MuJoCo simulation experiments only. The user confirmed
+that no real robot is being used. This approval does not authorize real-robot
+contact, establish physical safety limits, or validate the simulator as a
+hardware-safety system. Any future hardware study requires a separate protocol
+and safety review.
 
 #### A1. Task geometry and evaluator
 
-- Nominal peg diameter: 8 mm; stated radial clearance: 0.08 mm; resulting
-  nominal hole diameter: 8.16 mm. Measure the physical parts and document
-  diameter, roundness, straightness, and manufacturing tolerances.
-- Target insertion depth: 25 mm; success depth range: 20-25 mm inclusive;
-  maximum lateral center offset: 0.08 mm. Provisional simulation values are
-  0.1 s continuous seating dwell and 0.2 degrees maximum tilt; physical values
-  remain TBD.
-- Define a hole-fixed frame with its origin at the hole entrance and its axial
-  direction pointing into the hole. Measure lateral offset between the peg
-  and hole axes at the entrance plane, and define the peg reference point and
-  axial insertion depth in this frame before evaluation.
-- Record depth, lateral offset, angular alignment, contact/safety outcome,
-  and seating duration separately. Success requires actual insertion to the
-  agreed depth, lateral error <= 0.08 mm, and the agreed seating/safety
-  conditions; position alone must not count an adjacent peg as inserted.
-- Specify independent measurement methods and uncertainty for both simulator
-  and physical evaluation. In particular, demonstrate that the real measurement
-  system can resolve 0.08 mm lateral error; otherwise report uncertainty and
-  do not claim a definitive pass near the boundary.
+- Use the MuJoCo task model's 8 mm diameter, 60 mm long peg and nominal
+  8.16 mm diameter, 30 mm deep hole (0.08 mm nominal radial clearance).
+  The hole is represented by 64 faceted walls, so report this as a model
+  approximation, not physical geometry or tolerance verification.
+- A geometric success candidate must cross the hole entrance, reach 20-25 mm
+  insertion depth inclusive, have no more than 0.08 mm axis offset at the
+  entrance, and no more than 0.2 degrees angular error. Require 0.1 seconds of
+  continuous valid geometry. The evaluator also checks conservative peg
+  clearance along the inserted portion; position alone cannot count a peg
+  beside the hole as inserted.
+- Use a hole-fixed frame with origin at the entrance and positive depth directed
+  into the hole. Compute lateral error from the peg-axis intersection with the
+  entrance plane. Use MuJoCo ground truth for simulator scoring and record
+  depth, lateral error, angular error, dwell, contact, and termination reason
+  separately. The 1e-12 m allowance is numerical roundoff only.
+- Simulator geometry is exact relative to the modeled shapes, not evidence that
+  the model matches physical parts. Physical dimensions, tolerances, and
+  measurement uncertainty remain out of scope until hardware is selected.
 
 #### A2. Hardware and calibration record
 
-| Component | Simulator starting point | Real-robot specification |
-|---|---|---|
-| Robot | Existing MuJoCo Franka Panda | Model and controller: TBD |
-| Gripper and peg | Panda gripper holds a free 8 mm diameter, 60 mm long peg through simulated finger contacts; trials start with the peg grasped | Gripper, grasp, peg material and dimensions: TBD |
-| Hole and fixture | Kinematic fixture with 64 faceted walls approximating an 8.16 mm diameter, 30 mm deep hole; collidable table | Geometry, material, mounting, and compliance: TBD |
-| Cameras | Two fixed workspace cameras, `task_left_camera` and `task_right_camera`, aimed at the fixture; one provisional hand-mounted `task_wrist_camera` | Real hardware TBD; camera model, placement, calibration, resolution and rate to be specified |
-| Force/torque | Simulated six-axis hand load cell | Sensor, frame, range, sampling rate and limits: TBD |
+The approved setup is the existing MuJoCo Franka Panda task scene: a simulated
+finger grasp, kinematic fixture and collidable table, two fixed workspace
+cameras, a provisional hand camera, and a simulated six-axis hand wrench
+sensor. Trials start with the peg already grasped; pickup is not part of this
+protocol. Use the scene's named frames and simulated timestamps. Camera
+calibration, sensor noise/latency, and wrench interpretation are model
+properties, not physical calibration claims. The hand sensor reports a
+transmitted wrench, while the evaluator's peg/environment contact force is a
+separate ground-truth signal.
 
-- Record frame transforms among robot base, tool, load cell, camera(s), hole,
-  and peg; calibrate and independently verify each transform.
-- The initial protocol targets the MuJoCo Panda simulation; real-robot
-  hardware selection and contact trials are deferred. The simulated left and
-  right camera positions are defined and aimed at the fixture; verify their
-  fields of view, feeds, timestamps, and image calibration for the intended
-  data collection configuration.
-- Characterize force sensor zero/bias, payload and gravity effects, sign
-  convention, saturation, noise, latency, and synchronization. The MuJoCo
-  hand sensor measures a transmitted wrench, not automatically a pure contact
-  force; validate the estimate used for analysis and hardware protection.
-- Establish measurement uncertainty for peg pose, depth, contact force, and
-  timing. Recheck calibration and sensor zero at the prescribed intervals
-  (intervals TBD).
+There is no physical robot, gripper, fixture, camera, or force sensor in this
+study. Physical frame calibration, sensor characterization, uncertainty
+budgets, and safety limits are not applicable and remain prerequisites for any
+future hardware protocol.
 
 #### A3. Trial procedure and randomization
 
-1. Inspect fixture, peg, gripper, and safety systems; record calibration,
-   hardware/configuration versions, and the test conditions.
-2. Reset to a documented initial pose and verify grasp, sensor status, and
-   valid observations. Randomize the starting peg/hole pose and lighting
-   within predefined, physically reachable ranges (ranges TBD).
-3. Assign the policy variant and initial condition using a recorded random
-   seed; use matched trial conditions across variants where feasible.
-4. Execute the approach and insertion until independently verified success,
-   an operator/safety abort, or the episode time limit (time limit TBD).
-   Log every attempt, including early aborts and invalid trials.
-5. Record final pose, depth, lateral error, forces, retries, outcome, and
-   reason for termination; inspect/reset the hardware before the next trial.
-   Define excluded-trial rules and whether/how a safety abort ends a batch
-   before data collection begins.
+1. Run the robot-driven `position`, `hybrid`, or `impedance` baseline with the
+   fixture fixed. Set the peg in the documented grasped start state; settle
+   for 0.5 seconds and require contact with both fingers before starting the
+   scored episode.
+2. Use non-negative integer seeds. For each seed, all compared controllers
+   receive the same independently sampled fixture X/Y offsets in [-0.05,
+   0.05] mm and tilt components about world X/Y in [-0.03, 0.03] degrees.
+   The table stays horizontal; lighting is fixed. Record seed and realized
+   pose. These ranges define a narrow simulation benchmark, not a robustness
+   or physical-reachability claim.
+3. Use the same task configuration and randomization for each controller;
+   record controller, code/configuration revision, MuJoCo version, and
+   simulator seed. Use disjoint seeds for tuning and held-out evaluation.
+4. Start the 12-second episode after the initial grasp check. The nominal
+   downward Cartesian command is 0.005 m/s. End on evaluator success, force
+   stop, workspace violation, dropped peg, invalid simulation state, or
+   timeout. Preserve every started trial. A failed initial grasp is an invalid
+   start, must be recorded, and must not be silently counted as a task failure
+   or replaced without reporting it.
+5. Record outcome, termination reason, final pose and geometry, contact-force
+   summaries, and any invalid-start/abort status. Do not remove timeouts,
+   force stops, drops, or other unfavorable outcomes from results.
 
 #### A4. Safety and stopping rules
 
-- Set and validate task-specific hard axial/lateral force, moment, joint
-  torque, speed, workspace, and episode-duration limits before real contact
-  (all numeric thresholds TBD). Stop on limit violation, emergency stop,
-  loss of communication, stale/invalid sensor data, unexpected fixture
-  movement, dropped peg, or operator intervention.
-- Define Fref for contact analysis separately from the hard safety threshold.
-  Specify contact detection, filtering, sampling, force frame/sign, handling
-  of missing samples, and the rule for overlapping force failure labels.
-- Keep independent hardware protections active in every ablation, including
-  force-observation-off variants. Validate emergency stop, fault handling,
-  and safe recovery without assuming the learning policy will obey limits.
+- Use the simulation evaluator's 5 N peg/environment contact-force threshold,
+  1 N analysis reference, 12-second timeout, and workspace bounds of +/-0.3 m
+  in X/Y and -0.05 to +0.3 m in Z relative to the hole entrance. The 1 N
+  reference is an analysis threshold, not a safety threshold. Contact force
+  is the sum of magnitudes at peg/hole and peg/table contacts; finger contacts
+  are excluded. Log the net world-frame force separately when available.
+- The 5 N stop is checked after a physics step and can overshoot substantially;
+  it is a simulation termination condition, not a force cap or protective
+  safety mechanism. Keep reported peaks, including overshoots, and label any
+  force-stop trial as a failure. The current benchmark uses actuator/model
+  saturation but does not establish independent joint-torque or actual-speed
+  safety guarantees. The 0.005 m/s value is the commanded approach rate, not
+  an enforced speed limit.
+- Stop and report invalid simulation state, force-stop, workspace violation,
+  dropped peg, or timeout. This simulation has no operator emergency-stop,
+  communication-loss, or hardware fault-recovery test. Do not run physical
+  contact under this protocol.
+- For force analysis, use the evaluator's ground-truth peg/environment contact
+  force at the physics step, sampled at the simulation timestep. Count samples
+  strictly above Fref=1 N and merge contiguous samples into intervals; report
+  interval edges to one physics-step resolution. Report the maximum interval
+  and peak force separately. Keep the local hand-wrench signal distinct from
+  this contact-force metric. If reporting failure categories, retain geometric
+  and force labels independently; overlapping force labels use the documented
+  excessive-pressing > unstable-contact > stalled precedence.
 
 #### A5. Trial data contract
 
-- Trial metadata: experiment/run ID, variant, policy checkpoint, training
-  seed, trial seed, simulator/robot and software versions, calibration ID,
-  geometry, randomized initial conditions, and time base.
-- Time-stamped samples: camera frames or stable references, robot joint
-  positions/velocities, gripper state, peg/hole pose and uncertainty, nominal
-  and residual actions, executed action, wrench and sensor status, safety
-  events, contact state, and task phase. Record sample rates and clock
-  synchronization; log raw and processed force separately.
-- Outcome record: success and its individual checks, final depth/lateral error,
-  dwell duration, time to completion, peak contact force, intervals above Fref,
-  retries, both failure labels where applicable, termination reason, and
-  invalid/excluded-trial reason.
-- Log force for analysis and independent safety across all variants, but
-  prevent it from entering residual observations in force-off variants.
-  Define data storage, access, retention, and schema version before collection.
+- Store each run in a new, non-overwriting directory under
+  `mujoco_force_control/results/`; keep the manifest/summary and any full-rate
+  trace together. Record schema version, run ID, controller/variant,
+  checkpoint if applicable, training and trial seeds, software/model versions,
+  geometry, randomized initial conditions, and simulation-time base.
+- At each recorded sample, retain simulation time, camera images or stable
+  references, joint position/velocity, gripper state, peg/hole pose, nominal
+  and residual actions when applicable, executed control, local wrench and
+  contact force as distinct fields, contact/task phase, and termination or
+  sensor-status events. Record sample rates; do not align different-rate
+  streams by array index.
+- For each trial, retain success and each geometric check, final depth/lateral/
+  angular errors, seating dwell, duration, peak force, intervals above Fref,
+  retries if applicable, independent failure labels, termination reason, and
+  invalid-start/exclusion reason. Preserve raw and processed signals and all
+  failed trials.
+- Force may be logged for analysis in every policy variant, but must not be
+  exposed to residual observations when the force-observation factor is off.
+  The approved study is simulation-only and contains no human or personal
+  data; retain outputs with their provenance for reproducibility.
 
-Stage A exit: approve the unresolved criteria, hardware specification,
-calibration/measurement procedure, randomization, stopping limits, and data
-schema before training; separately pass hardware safety checks before real
-contact.
+Stage A exit: the task definition, simulator setup, trial/randomization
+procedure, simulation stopping/analysis rules, and data contract above are
+approved for simulation-only experiments. Stage A is complete for that scope.
+Training readiness still depends on Stage C's action conversion and dataset
+validation. Real-robot hardware specification, measurement/calibration
+validation, numeric physical limits, and safety approval remain explicitly
+unresolved; no real-robot contact is authorized.
 
 ### Stage B: Establish the simulator benchmark
 
-The initial scaffold includes a Panda scene with a free peg, finger grasp,
-table, faceted hole, two workspace cameras, and seeded fixture offsets.
-`PegEpisode` now checks insertion, 0.1 s continuous seating, 0.2 degree tilt,
-clearance along the inserted peg, force, drop, workspace, invalid state and
-timeout. Intentional release is explicit. Contact-force samples, peak and
-intervals above the reference are recorded through termination.
+Status: complete as a reproducible MuJoCo benchmark prototype, not as a
+hardware-ready system or statistically conclusive comparison. The Panda task
+scene, free peg, simulated grasp, table, faceted hole, cameras, and seeded
+fixture offsets are in place. `PegEpisode` checks entrance crossing, insertion
+geometry and continuous seating dwell, plus force, drop, workspace, invalid
+state, and timeout termination. Intentional release is explicit. Contact
+samples, peak force, and intervals above the analysis reference are recorded
+through termination.
 
-Preliminary simulation-only defaults are Fref = 1 N, a 5 N force stop, and
-20 s timeout. Scripted kinematic fixture probes at 0.01 and 0.02 m/s measured
-aligned peaks of 0.287 and 0 N, jam peaks of 10.645 and 15.583 N, and pressing
-peaks of 5.720 and 6.268 N, respectively. Raw traces and the exact protocol
-are in `mujoco_force_control/results/force_probes/` and the project README.
-These few trials are not statistical validation or hardware safety limits.
-Contact and grasp parameters are provisional; reset starts with the peg
-between the fingers rather than executing a pick-up.
+The evaluator defaults are Fref = 1 N, a 5 N force-stop threshold, and a
+20-second timeout; the paired robot-driven benchmark explicitly uses a
+12-second timeout. Scripted kinematic fixture probes at 0.01 and 0.02 m/s
+measured aligned peaks of 0.287 and 0 N, jam peaks of 10.645 and 15.583 N,
+and pressing peaks of 5.720 and 6.268 N, respectively. Raw traces and exact
+commands are in `mujoco_force_control/results/force_probes/` and the project
+README. These probes are diagnostic, not statistical validation or safety
+limits. Contact, friction, and grasp parameters remain provisional; reset
+starts with the peg between the fingers rather than executing a pickup.
 
 The Stage B trial starts with an already-grasped peg, checks initial contact
 with both fingers, and keeps the fixture fixed while the robot inserts.
@@ -259,50 +284,74 @@ The benchmark supplies reproducible Gaussian wrist-wrench noise and fixed
 latency; camera and encoder observations remain ideal. It records termination
 reasons, force summaries and heuristic failure labels, with optional per-step
 traces. Labels deliberately leave ambiguous final geometry unclassified.
-See the README for settings, commands, classification rules and limitations.
+Seeded reset, geometry/tolerance boundaries, collision clearance, force
+accounting, failure termination, noise/latency behavior, paired reproducibility,
+and all three controller baselines have regression coverage. Run the focused
+suite from `mujoco_force_control/` with
+`python3 -m pytest -q tests/test_peg_in_hole.py tests/test_peg_episode.py tests/test_stage_b_benchmark.py`.
+See the README for benchmark settings, commands, classification rules and
+limitations.
 On the ten paired held-out seeds 10-19, position achieved 8 successes, hybrid
 10, and impedance 9; failures and earlier untuned pilot outcomes are retained.
 A five-seed wider-pose stress run produced 4, 5, and 5 successes respectively.
-One position trial peaked at 44.9 N despite the 5 N stop because stopping occurs
-after a physics step. These small, oracle-aligned simulator samples do not
-validate hardware safety or establish comparative performance.
-
-- Extend the existing MuJoCo Panda environment with a peg, hole, fixture,
-  contact/friction parameters, randomized initial pose, and observable success
-  metrics.
-- Validate collision geometry and insertion tolerances against the clarified
-  task dimensions.
-- Add reproducible task reset, sensor noise/latency models, evaluation, and
-  regression tests for success, failure, force limits, and reset behavior.
-- Establish classical position, hybrid force, and impedance/admittance
-  baselines before training a learned residual.
+One position trial peaked at 44.9 N despite the 5 N stop because stopping
+occurs after a physics step. This value and the benchmark's smaller observed
+peaks confirm that the threshold is only a termination condition, not a force
+cap. The small, oracle-aligned simulator samples do not validate hardware
+safety or establish comparative performance. Stage B is complete for the
+simulation-only scope: scene, evaluator, seeded reset, noise/latency model,
+classical baselines, traceable metrics, and regression coverage are implemented.
+Use more trials and broader evaluation before making comparative-performance
+claims; Stage C action conversion and data readiness remain separate gates
+before training.
 
 ### Stage C: Integrate pi0.5 and collect demonstrations
 
-- In progress: camera/state preprocessing, a non-actuating preview, and
-  guarded simulation-only closed-loop execution are implemented and tested
-  with the real pi05_droid checkpoint. The current configuration returned a
-  15x8 chunk, despite the example describing 10x8. A recorded contact trial
-  dropped the peg; it was not a successful insertion. The loop freezes physics
-  during inference and is not a real-time or hardware-safe controller.
-- A five-trial classical simulation pilot and a separate pi0.5 failure are
-  recorded with disjoint classical split seeds. The pilot is too small to
-  establish performance or train a residual; classical actuator controls
-  are not DROID actions. Weight-specific license terms, a representative
-  dataset, action conversion, and complete normalization remain unresolved.
-  See the project README for the data contract and limitations.
-- The v2 recorder additionally captures every physics-step input and replay
-  state, linked to approximately 15 Hz camera samples. Direct conversion of
-  observed joint motion to DROID-like commands and a bounded replay-fitted
-  alternative were tested; both have substantial peg-tip reconstruction
-  errors relative to 0.08 mm clearance. Do not train the planned imitation
-  baseline until conversion and continuous held-out replay are validated.
-- Implement and test camera/state preprocessing and action postprocessing.
-- Verify inference timing and safe low-level action execution on the intended
-  robot without contact, then in guarded low-risk contact trials.
-- Collect task demonstrations and failures with synchronized images, state,
-  wrench, action, phase, and outcome labels.
-- Split data by trial/scene to avoid leakage; fit normalization on training data.
+Simulation integration prototype status: camera/state preprocessing,
+non-actuating preview, bounded action postprocessing, local pi05_droid
+inference, guarded simulation rollout, synchronized recording, and
+training-only feature statistics are implemented and regression-tested.
+OpenPI's pinned configuration returns 15x8 actions. The rollout records
+p50/p95/maximum inference times and deadline misses against an eight-action
+chunk budget. The earlier 58-call trial re-inferred after every action; its
+p50 was 80.7 ms and p95 was 83.5 ms against the 66.7 ms single-action period.
+Using eight actions per inference matches the pinned OpenPI DROID example.
+A warmed local pi0.5 rollout made 8 calls for 60 actions over 4 s of sim time
+(p50 84.0 ms, p95 86.4 ms, max 86.7 ms; 0/8 exceeded the 533 ms chunk
+budget), but timed out without a successful insertion. The cold first call
+exceeded the 5 s client timeout. The simulator still pauses synchronously at
+chunk boundaries, so this is not proof of 15 Hz wall-clock control.
+
+Stage C is not complete for training or deployment. The existing pi0.5
+contact run dropped the peg. Classical actuator controls are not DROID action
+labels, and the tested achieved-motion/replay-fitted conversions still have
+peg-tip errors larger than the 0.08 mm clearance scale. The development set
+is small and does not establish a representative successful demonstration
+dataset. The collector now fits training-only mean/std statistics for joint
+position, joint velocity, gripper-closed fraction, and local wrench, with a
+1e-6 standard-deviation floor; these auxiliary statistics do not replace the
+pretrained checkpoint's own OpenPI transforms.
+
+An oracle-guided scripted teacher has since been implemented with privileged
+MuJoCo geometry and the rollout's bounded 0.2-radian joint-delta pipeline.
+It completed 10/10 local simulator checks over seeds 0–9 with randomized
+fixture offsets and tilts; a three-seed regression test verifies the saved
+normalized action reconstructs the joint target actually executed. These are
+synthetic simulator labels, not human demonstrations or evidence of transfer.
+The new `stage_c_oracle_v2` collection has 2,466 observations over disjoint
+20/5/5 train/validation/test trials. It has 2,046 complete 15-step action
+windows (1,361 train, 340 validation, 345 test); all 30 trials passed
+simulator checks and action-label reconstruction was exact. It is about 5.9x
+the earlier training sample count, but remains narrow and simulator-only,
+and still needs conversion to OpenPI's DROID/LeRobot dataset layout.
+
+The pinned `pi05_droid` configuration uses Gemma variants; the same OpenPI
+revision includes Gemma terms separate from its Apache source license. Review
+the current Gemma terms and any checkpoint-provider terms before fine-tuning
+or redistribution; this repository cannot confirm a user's acceptance or
+provide legal advice. No physical robot is in scope, so hardware validation
+is not applicable and must not be inferred from simulation. See the project
+README for data, timing, license and remaining training-readiness limitations.
 
 ### Stage D: Train the residual policy and ablations
 

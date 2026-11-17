@@ -1,0 +1,27 @@
+{
+  "schema": "stage-c-demonstration-inspection-v1",
+  "source_manifest_sha256": "af2565c09b8b1e194cbe722d6428f1bd66266b82ee9eb33d04b9295930d839ef",
+  "split": "train",
+  "trials": 20,
+  "frames": 1641,
+  "example_seed": 0,
+  "joint_action_abs_max": 0.01121724583208561,
+  "joint_action_abs_p95": 0.010651150718331337,
+  "gripper_closed_fraction_of_labels": 1.0,
+  "adjacent_frame_mean_absolute_rgb_change": {
+    "exterior": {
+      "median_on_0_to_255_scale": 0.23388339579105377,
+      "p95_on_0_to_255_scale": 0.25302934646606445
+    },
+    "wrist": {
+      "median_on_0_to_255_scale": 0.091331847012043,
+      "p95_on_0_to_255_scale": 0.1362072229385376
+    }
+  },
+  "limitations": [
+    "Pixel change is not a visibility or learnability test.",
+    "The oracle uses simulator geometry and internal target history unavailable to the policy.",
+    "Training frames are correlated within episodes; the split contains no policy recovery trajectories.",
+    "The images show only examples, not proof that clearance-scale alignment is observable."
+  ]
+}

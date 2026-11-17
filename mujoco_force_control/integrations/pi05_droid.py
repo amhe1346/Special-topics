@@ -11,6 +11,7 @@ from PIL import Image
 
 IMAGE_SIZE = 224
 CHUNK_SHAPE = (15, 8)
+DROID_MAX_JOINT_DELTA_RAD = 0.2
 
 
 class Policy(Protocol):
@@ -82,6 +83,16 @@ class ActionPreview:
     gripper_closed: bool
 
 
+def droid_joint_velocity_to_delta(normalized_velocity: np.ndarray) -> np.ndarray:
+    """Convert DROID normalized joint velocities to one 15 Hz joint delta."""
+    velocity = np.asarray(normalized_velocity, dtype=np.float64)
+    if velocity.ndim < 1 or velocity.shape[-1] != 7:
+        raise ValueError("normalized joint velocities must have a final dimension of 7")
+    if not np.all(np.isfinite(velocity)) or np.any(np.abs(velocity) > 1.0):
+        raise ValueError("normalized joint velocities must be finite and within [-1, 1]")
+    return velocity * DROID_MAX_JOINT_DELTA_RAD
+
+
 def preview_actions(response: dict) -> tuple[ActionPreview, ...]:
     """Validate all 15 actions; apply the example's clipping and gripper rule."""
     if "actions" not in response:
@@ -91,7 +102,11 @@ def preview_actions(response: dict) -> tuple[ActionPreview, ...]:
         raise ValueError("policy actions must be a finite (15, 8) array")
     actions = np.clip(actions, -1.0, 1.0)
     return tuple(
-        ActionPreview(row[:7].copy(), row[:7].copy() * 0.2, bool(row[7] > 0.5))
+        ActionPreview(
+            row[:7].copy(),
+            droid_joint_velocity_to_delta(row[:7]),
+            bool(row[7] > 0.5),
+        )
         for row in actions
     )
 

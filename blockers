@@ -1,0 +1,50 @@
+The blockers are mainly for training readiness, with separate limitations for deployment:
+
+No validated action labels. The classical collector records controller outputs, not the DROID-compatible joint-velocity actions pi0.5 was trained to use. The attempted conversions from motion have peg-tip replay errors larger than the task’s 0.08 mm clearance, so they aren’t safe to use as imitation labels. Accurate labels and continuous held-out replay are still needed. Stage C notes
+
+Too little representative data. The current development set has just 277 training samples, and the recorded pi0.5 contact trial dropped the peg rather than completing an insertion. That is not enough to establish a useful set of successful demonstrations and failures. Dataset and trial results
+
+No 15 Hz wall-clock inference. In the recorded trial, all 58 inference calls exceeded the 66.7 ms control period; median latency was 80.7 ms. The current simulation pauses during inference, so this is not real-time control. Timing summary
+
+Checkpoint-weight terms are unclear. The OpenPI code license does not establish the terms for the pi0.5 checkpoint weights; confirm them before redistribution or fine-tuning. License caveat and references
+
+So the integration prototype works, but training needs valid action labels and a larger, representative dataset. Deployment additionally needs acceptable real-time performance and safety validation. Hardware validation is out of scope because you said there is no real robot
+
+
+
+--------------------------------------------
+
+he scripted teacher now completes insertion in the bounded rollout. It succeeded on 10/10 local simulator seeds with randomized fixture offsets and tilts. Regression tests also verify each normalized action matches the bounded joint target actually executed.
+
+Changes are in scripted_teacher.py, test_stage_c.py, the project README, and thoughts.
+
+Validation: 105 passed, 1 skipped.
+
+Still blocked for training or deployment: no oracle-labeled dataset has been collected, the current data is too small, pi0.5 missed the 15 Hz timing target, and checkpoint weight terms need confirmation. The teacher uses privileged simulator state, so its success does not establish transfer
+----------------
+Worked on all four blockers:
+
+Oracle labels and data volume: Collected stage_c_oracle_v2: 30/30 successful simulator trials, 2,466 observations, and 2,046 complete 15×8 action windows—1,361 train, 340 validation, 345 test. Executed-action labels matched the teacher labels exactly. The collection code is collect_scripted_teacher.py.
+Inference cadence: The rollout now reuses eight actions per prediction, following the pinned OpenPI DROID example. In a warmed run, 8 calls covered 60 actions; p50/p95/max latency was 84.0/86.4/86.7 ms, with no calls exceeding the 533 ms chunk budget. The trial still timed out without a successful pi0.5 insertion, and synchronous inference still pauses simulation—this does not establish a true 15 Hz wall-clock rate. The first cold request exceeded the 5-second timeout; warm the model with the non-actuating preview first.
+Checkpoint terms: The pinned pi05_droid configuration uses Gemma variants, and OpenPI includes separate Gemma terms. I documented the distribution conditions and distinction from the Apache source license in the README. I can’t verify acceptance for this checkpoint download or rule out additional provider terms; confirm those before fine-tuning or sharing weights.
+Validation: Full suite: 108 passed, 1 skipped.
+The dataset is still narrow and simulator-only. Its 15×8 shape matches the model horizon, but action scaling needs validation against DROID normalization, and the files need conversion to OpenPI’s DROID/LeRobot layout before fine-tuning
+
+
+-
+
+
+The next priority is to make the data trainable and prove the policy works—not collect more samples blindly.
+
+Validate action semantics and convert the dataset.
+
+I’ll verify the action-unit conversion against the pinned DROID transform and loader, then implement a fail-closed dataset export and run an import/shape check. I’ll preserve the generated oracle source dataset and write any converted output to a new directory.
+
+-----
+The preflight exposed two timestamp details: MuJoCo’s 2 ms ticks produce 66/68 ms observation intervals, and short episodes can differ from exactly 15 Hz by one physics tick at the endpoints. I adjusted validation to account for that quantization while still rejecting incorrect rates; all 30 source trials now pass preflight. Next I’m recreating the failed partial output and validating OpenPI’s actual 16-step loader path.
+
+Completed the oracle-to-LeRobot conversion. The exporter validates all 30 trials, including action scaling, chunk alignment, outcomes, and timing jitter from MuJoCo’s 2 ms steps.
+
+The converted datasets contain 20/5/5 train/validation/test episodes with 1,641/410/415 frames. I verified each split loads as a 16-step sequence through OpenPI’s DROID transforms, producing (16, 32) actions. The conversion manifest records the results and limitations.
+
+The full test suite passes: 113 passed, 1 skipped. This verifies data and loader compatibility, not training convergence or policy performance; fine-tuning has not been run. Documentation was updated in the README.

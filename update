@@ -140,3 +140,130 @@ CURC references:
   https://curc.readthedocs.io/en/latest/running-jobs/job-resources.html
   https://curc.readthedocs.io/en/latest/running-jobs/job-arrays.html
   https://curc.readthedocs.io/en/latest/clusters/alpine/alpine-hardware.html
+
+
+  ----------------------------
+
+
+
+  upadte nov 17th 
+  
+  
+  he short version
+The project is a working simulation and AI integration prototype, but it has not yet demonstrated that the AI policy can complete the task.
+
+The confusion is understandable: “Stage C complete” referred to getting the integration prototype running, not to finishing training or proving performance.
+
+What we just accomplished
+We created a scripted teacher: conventional code that uses privileged simulator information to perform insertions. It is not the AI policy. We collected 30 successful teacher demonstrations and converted them into a format OpenPI can read:
+
+20 training, 5 validation, and 5 test episodes
+2,466 total observations
+Action units and the OpenPI data transforms were checked.
+The latest test run passed 113 tests, with one skipped.
+This means we have a starting point for training, not proof that the AI has learned the task. The dataset is small, narrow, and entirely simulated.
+What is still missing
+Fine-tune a policy and evaluate it. No imitation policy has been trained yet. We need to compare it against the existing pi0.5 baseline on held-out trials and check whether it actually inserts the peg.
+Confirm checkpoint terms before fine-tuning or sharing weights.
+Establish real-time behavior if needed. Chunked inference met its measured eight-action time budget, but the simulation pauses during inference; this does not prove a real 15 Hz control loop.
+Assess generalization and safety. The teacher relies on information unavailable to the policy, and the data covers only small simulated variations. No physical robot was used or validated.
+Recommended next step: confirm the checkpoint terms, then prepare a small fine-tuning experiment and evaluate the trained policy on the held-out simulation trials. That will tell us whether the converted data is actually useful.
+
+The blockers file is a chronological log, so its earlier statements that no oracle data exists and that conversion is still needed are now outdated.
+
+
+
+For this project, I’d make the residual policy the main research goal and use imitation as the first baseline. They aren’t mutually exclusive.
+
+Imitation policy: learns to copy the scripted teacher’s actions. It’s the simplest way to test whether our converted demonstrations are useful.
+Residual policy: keeps pi0.5 fixed and learns a correction to its actions, potentially using force information. That better matches the force-aware residual-control goal described in update.
+Why not jump straight to residual training?
+Our current pi0.5 rollout has not completed an insertion. A residual controller may improve it, but a small correction might not be enough if the base policy’s actions are far from what the task requires. We also haven’t defined how to train the residual or demonstrated that our limited data covers the states pi0.5 visits when it fails.
+
+The teacher is successful, but it uses simulator information the learned policy won’t have. The classical controllers also use privileged geometry for alignment, so their success is not a direct comparison with a camera-based policy.
+
+Recommended order
+Evaluate fixed pi0.5 on a consistent set of simulation trials: this is the baseline.
+Train a small imitation baseline from the existing demonstrations and evaluate on held-out seeds. This tests the data and training pipeline.
+Train and evaluate a residual policy around fixed pi0.5, with and without force observations, using the same evaluation protocol.
+Then we can answer “which is better?” with measured insertion success, failures, and contact forces—not assumptions. My recommendation is imitation first for learning and validation, residual second for the project’s main question. Neither approach is proven yet, and checkpoint terms still need confirmation before fine-tuning.
+
+
+---------
+
+
+uilt the evaluation workflow and ran the original pi0.5 policy on the five validation seeds, using the oracle dataset’s fixture offsets and tilts.
+
+Baseline result: 0/5 successful insertions—four trials dropped the peg, and one stopped before a requested release. The baseline report records each trial and its timing.
+
+I also added support for evaluating a future fine-tuned checkpoint with the same workflow. Its 16-action output adapter passed a mock test, but no trained checkpoint exists yet, so actual checkpoint loading remains unverified. The test seeds remain unused.
+
+Validation: 120 passed, 2 skipped in the project suite; the OpenPI-specific adapter test passed separately. The simulation still pauses during inference, so these results do not establish real-time or hardware performance. See the README for reproduction commands.
+
+
+
+Next priority: train a first imitation policy
+We now have a baseline: the original pi0.5 policy completed 0 of 5 validation insertions. The next question is whether training on the teacher demonstrations improves that result.
+
+Review the checkpoint terms. This remains necessary before fine-tuning.
+Choose where to train. Alpine’s 80 GB GPU is the prepared route for full fine-tuning. If Alpine login remains blocked, we could investigate a smaller LoRA experiment on the local 4090, but it isn’t configured or verified yet.
+Run a short training smoke test. This checks that the training pipeline can produce a checkpoint; it won’t prove the policy has learned.
+Train and evaluate an imitation policy. Load the resulting checkpoint and compare it with the original on the same five validation seeds. Record success, failure reasons, forces, and timing.
+Only after development, evaluate on test seeds. Keep those untouched while choosing training settings.
+
+
+
+
+OpenPI explicitly presents pi05_droid as a checkpoint for fine-tuning and provides a custom DROID fine-tuning guide.Result: not yet fully confirmed
+I found strong evidence that Physical Intelligence intends this checkpoint to be fine-tuned, but I cannot conclusively confirm all applicable terms or Alpine use from the published sources.
+
+Fine-tuning: OpenPI explicitly lists gs://openpi-assets/checkpoints/pi05_droid for inference and fine-tuning and provides a custom DROID fine-tuning recipe.
+Weight license: An OpenPI contributor said the model weights were under Apache 2.0. That statement predates pi0.5, however, and the repository later added Gemma terms. It does not explicitly settle the terms for this checkpoint and its components.
+Alpine: CURC policy requires valid cluster licenses for licensed software installations and prohibits computational jobs on login nodes. It does not specifically approve this checkpoint or determine whether putting it on a shared cluster constitutes distribution under its terms.
+I updated the project README with the new evidence. No training was run, and I haven’t contacted either organization on your behalf.
+
+Next step: request written confirmation
+You can send this to Physical Intelligence at research@physicalintelligence.company, listed on its OpenPI announcement:
+
+Subject: License for pi05_droid research fine-tuning
+
+I would like to privately fine-tune gs://openpi-assets/checkpoints/pi05_droid for a university research project using simulated robot data, on the University of Colorado’s shared Alpine HPC cluster.
+
+Which license and component terms apply to this checkpoint and its fine-tuned derivatives? Do they permit this private research use and storage on an access-controlled university cluster? Would uploading the weights to the cluster count as distribution, and are any notices or other conditions required?
+
+For the cluster side, send the answer to CURC support at rc-help@
+
+
+
+
+
+Great—Alpine login removes the main access blocker. Meanwhile, I completed the local work:
+
+Evaluation: Added repeated validation trials and more detailed simulated contact-force reporting. The test seeds remain unused.
+Demonstrations: Inspected all 1,641 training frames and saved example camera views. The peg and fixture are visible, but that doesn’t prove the policy can infer the fine alignment needed. All demonstrated gripper labels are closed.
+Timing: In one wall-paced simulation run, the policy dropped the peg. Thirteen action intervals exceeded the 15 Hz period plus physics-step tolerance; the longest was about 200 ms. This is not a real-time or hardware guarantee.
+Alpine: Prepared a Slurm smoke-test script and transfer/setup instructions. They haven’t been run on Alpine yet.
+The project suite passed 123 tests, with 2 skipped; the final focused checks passed 23 tests, with 2 skipped.
+
+
+
+------------
+
+Worked on and completed today
+Selected pi05_droid as the checkpoint for the imitation experiment; OpenPI explicitly provides it for fine-tuning.
+Established the original policy’s validation baseline: 0/5 successful insertions.
+Improved evaluation to record contact-force summaries and support repeated validation trials.
+Inspected the training demonstrations and saved example camera views. The policy’s ability to learn the teacher’s actions remains unproven.
+Ran a wall-paced simulation probe. One trial dropped the peg, and action delivery did not consistently meet the 15 Hz period.
+Regained access to Alpine and confirmed the ucb-general allocation.
+Transferred the project and training data to Alpine.
+Worked around a Linux compatibility issue by setting up an Apptainer container on private scratch storage and installing the pinned OpenPI dependencies.
+
+Still in progress or to do
+Finish the Alpine data preflight. It downloaded one asset and is currently using a fallback downloader; it has not yet reported success or failure.
+Review the applicable checkpoint terms before using the launcher’s terms-review acknowledgment.
+Verify that the pretrained checkpoint weights are available on Alpine and that the container can access an allocated GPU.
+Adapt and verify the prepared Slurm job for the container, then run a short fine-tuning smoke test.
+Train an imitation policy and compare it with the original on the same validation trials.
+Reserve the test seeds for final evaluation and keep needed checkpoints backed up: Alpine scratch storage can be purged.
+No policy has been trained yet, and neither real-time control nor physical-robot safety has been established.
