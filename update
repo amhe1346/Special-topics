@@ -267,3 +267,60 @@ Adapt and verify the prepared Slurm job for the container, then run a short fine
 Train an imitation policy and compare it with the original on the same validation trials.
 Reserve the test seeds for final evaluation and keep needed checkpoints backed up: Alpine scratch storage can be purged.
 No policy has been trained yet, and neither real-time control nor physical-robot safety has been established.
+
+----------------------
+
+
+nov 18th update
+
+Today the project moved closer to its first policy-training experiment on
+the CU Boulder Alpine cluster. The converted training data passed the OpenPI
+preflight inside an Apptainer container: it loaded a batch with the expected
+(2, 16, 32) action shape and pretrained DROID normalization. The original
+pi05_droid checkpoint weights were transferred to private scratch storage;
+the aggregate checksum of the transferred files matched the local cached
+copy. An allocated NVIDIA A100 80 GB GPU was also visible to JAX inside the
+container. These checks do not yet prove that training will complete.
+
+A 100-step full fine-tuning smoke test was submitted as Alpine job 35923530
+and was reported running at the last check. Its purpose is to test GPU
+initialization, the data and checkpoint pipeline, and checkpoint saving;
+the log has not yet confirmed that training has started or completed. This
+short run is not evidence that the policy has learned. An earlier submission
+failed before training because required environment variables were missing;
+the current submission explicitly passes them.
+
+Overall, Stage A is complete for the simulation protocol, and Stage B is
+complete as a tested simulation benchmark prototype, not a hardware-validated
+system. Stage C has a working pi0.5 simulation integration, converted teacher
+demonstrations, and a validation baseline, but policy training and evaluation
+remain unfinished. The original pi0.5 checkpoint achieved 0/5 successful
+insertions on the five validation trials; the scripted teacher's successful
+demonstrations use privileged simulator geometry that the learned policy
+does not receive.
+
+Current progress and limitations:
+- The synthetic dataset contains 30 successful teacher episodes: 20 training,
+  5 validation, and 5 test, with 1,641 training observations. It is narrow
+  and does not establish that a policy can learn or generalize.
+- Evaluation can record failures and contact-force summaries and repeat
+  validation trials. The final test seeds remain reserved.
+- A wall-paced simulation probe did not consistently meet the 15 Hz action
+  period and dropped the peg. It does not establish real-time or physical
+  robot safety.
+- No trained imitation or residual policy, successful trained-checkpoint
+  load, or trained-policy insertion has yet been confirmed.
+
+Next steps:
+- Check the smoke job's final status and log, and verify any checkpoint it
+  produces can actually be loaded. Back up needed files because scratch
+  storage can be purged.
+- If the smoke test succeeds, plan a longer exploratory training run using
+  its measured resource use; decide checkpoint retention before relying on
+  intermediate checkpoints for selection.
+- Compare the resulting policy against the original on the same validation
+  conditions, including success, failure reasons, forces, and timing. Use the
+  held-out test seeds only after development choices are fixed.
+- Review the applicable checkpoint terms and any obligations before sharing
+  weights. Physical robot validation and safety remain outside the current
+  simulation-only scope.

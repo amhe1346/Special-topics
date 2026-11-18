@@ -33,6 +33,12 @@ def test_invalid_experiment_name_is_rejected():
     assert "--exp-name must be a single directory name" in result.stderr
 
 
+def test_invalid_diagnostic_interval_is_rejected():
+    result = run_cli("--diagnostic-interval-s", "-1")
+    assert result.returncode != 0
+    assert "--diagnostic-interval-s must be non-negative" in result.stderr
+
+
 def test_incomplete_dataset_is_rejected_before_loading_dependencies(tmp_path):
     (tmp_path / "conversion_manifest.json").write_text('{"status":"in_progress"}')
     result = run_cli("--dataset", str(tmp_path))

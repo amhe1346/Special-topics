@@ -752,23 +752,15 @@ single-node smoke-test request could use:
 #SBATCH --partition=aa100
 #SBATCH --qos=gpu-normal
 #SBATCH --gres=gpu:a100_80gb:1
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
 ```
 
 These are starting estimates, not measured requirements or a submitted job.
-After reviewing the terms, from `mujoco_force_control` in that allocation:
-
-```sh
-OPENPI_DATA_HOME="$PWD/.openpi/model-cache" XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
-  .openpi/.venv/bin/python run_oracle_finetune.py \
-  --dataset results/stage_c_oracle_lerobot \
-  --train --terms-reviewed --checkpoint-base-dir /path/to/private/checkpoints \
-  --exp-name oracle-smoke --steps 100 --batch-size 2
-```
-
-The flag records the operator's acknowledgement; it does not establish
+The `--terms-reviewed` flag records the operator's acknowledgement; it does not establish
 which terms apply or accept them on anyone's behalf. The 100-step run is
 only a pipeline smoke test: OpenPI's unchanged learning-rate schedule has a
 1,000-step warmup, so it is not a meaningful convergence experiment.
@@ -805,45 +797,56 @@ rsync -av mujoco_force_control/results/stage_c_oracle_lerobot/train \
   amhe1346@login.rc.colorado.edu:special-topics-private/project/results/stage_c_oracle_lerobot/
 ```
 
-On an allocated compute node, install OpenPI at revision
-`215abfb217dbac7d5f1273282331b9b1866c0479` in `project/.openpi`, using the
-upstream installation instructions and `uv`. Do not copy the local virtual
-environment: its interpreter paths and GPU dependencies are machine-specific.
-Prepare the pretrained `pi05_droid` assets, weights, and tokenizer in the
-OpenPI cache, then run the data preflight from `project`. Compute-node network
-access and available CUDA drivers must be checked on Alpine.
+On the tested Alpine CPU node, glibc 2.28 cannot install the pinned
+`rerun-sdk` wheel, which requires glibc 2.31 or newer. A Python 3.11 Bookworm
+Apptainer image, OpenPI revision `215abfb217dbac7d5f1273282331b9b1866c0479`,
+and its locked dependencies were installed on private Alpine scratch. The
+data preflight timed out before it reported success; it must be retried.
+Do not copy the host virtual environment into the container.
 
-For example, after installing `uv` per your institution's guidance, on the
-allocated node:
+To update the already transferred project, run this from the local repository
+root. It copies only the changed launcher and job template, not weights or
+test data:
 
 ```sh
-cd "$HOME/special-topics-private/project"
-git clone https://github.com/Physical-Intelligence/openpi.git .openpi
-git -C .openpi checkout 215abfb217dbac7d5f1273282331b9b1866c0479
-git -C .openpi submodule update --init --recursive
-cd .openpi
-GIT_LFS_SKIP_SMUDGE=1 uv sync
-GIT_LFS_SKIP_SMUDGE=1 uv pip install -e .
-cd ..
-OPENPI_DATA_HOME="$HOME/special-topics-private/model-cache" JAX_PLATFORMS=cpu \
-  .openpi/.venv/bin/python run_oracle_finetune.py \
+rsync -av mujoco_force_control/run_oracle_finetune.py \
+  mujoco_force_control/alpine_pi05_smoke.slurm \
+  amhe1346@login.rc.colorado.edu:/scratch/alpine/amhe1346/pi05-private/project/
+```
+
+In an allocated Alpine CPU session, retry with progress messages and a thread
+dump every 60 seconds to locate any hang:
+
+```sh
+export WORK="/scratch/alpine/$USER/pi05-private"
+export IMAGE="$WORK/containers/python311-bookworm.sif"
+cd "$WORK/project"
+apptainer exec --bind "$WORK:$WORK" \
+  --env "OPENPI_DATA_HOME=$WORK/model-cache,JAX_PLATFORMS=cpu" \
+  "$IMAGE" "$WORK/project/.openpi/.venv/bin/python" -u run_oracle_finetune.py \
+  --diagnostic-interval-s 60 \
   --dataset results/stage_c_oracle_lerobot
 ```
 
 The preflight loads data, normalization and tokenizer assets but not the
-pretrained model weights. The initial training run still needs the weights
-available in the cache or network access to download them.
+pretrained model weights. Check that the output says `preflight_passed`.
+The presence and hash of Alpine's normalization file matched the locally
+verified copy, but this alone does not prove that the loader succeeded.
 
-The template `alpine_pi05_smoke.slurm` requests an 80 GB A100. Select your
-actual allocation, an existing private work directory on suitable cluster
-storage, and a unique experiment name. Submit from the project directory
-after reviewing the terms:
+The container smoke-job template requests an 80 GB A100. It checks that
+checkpoint metadata exists and JAX sees an allocated GPU before training;
+metadata presence does not establish that the weight files are complete or
+uncorrupted. Prepare and independently verify the full pretrained `params`
+cache before submitting. Submit from the scratch project directory only after
+the data preflight and operator review of applicable terms:
 
 ```sh
-export PRIVATE_WORK_DIR="$HOME/special-topics-private"
+export PRIVATE_WORK_DIR="/scratch/alpine/$USER/pi05-private"
+export CONTAINER_IMAGE="$PRIVATE_WORK_DIR/containers/python311-bookworm.sif"
 export EXPERIMENT_NAME=oracle-smoke-01
 export TERMS_REVIEWED=yes
-sbatch --account=YOUR_ALLOCATION alpine_pi05_smoke.slurm
+cd "$PRIVATE_WORK_DIR/project"
+sbatch --account=ucb-general alpine_pi05_smoke.slurm
 ```
 
 The OpenPI downloader changes cache-internal permissions to be broadly

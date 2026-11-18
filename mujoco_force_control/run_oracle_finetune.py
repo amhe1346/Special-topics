@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import faulthandler
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,10 @@ def main() -> None:
     parser.add_argument("--dataset", type=Path, default=ROOT / "results/stage_c_oracle_lerobot")
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument(
+        "--diagnostic-interval-s", type=int, default=0,
+        help="print Python thread stacks periodically while preflight runs (0 disables)",
+    )
     parser.add_argument("--checkpoint-base-dir", type=Path)
     parser.add_argument("--exp-name")
     parser.add_argument("--train", action="store_true", help="run training rather than just a data preflight")
@@ -32,6 +37,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.batch_size < 1 or args.steps < 1:
         parser.error("--batch-size and --steps must be positive")
+    if args.diagnostic_interval_s < 0:
+        parser.error("--diagnostic-interval-s must be non-negative")
     if args.train and not args.terms_reviewed:
         parser.error("training requires --terms-reviewed")
     if args.train and (args.checkpoint_base_dir is None or not args.exp_name):
@@ -53,6 +60,9 @@ def main() -> None:
     os.environ["HF_LEROBOT_HOME"] = str(dataset_root)
     os.environ["HF_HUB_OFFLINE"] = "1"
 
+    if args.diagnostic_interval_s:
+        faulthandler.dump_traceback_later(args.diagnostic_interval_s, repeat=True)
+    print("Preflight: importing OpenPI dependencies", file=sys.stderr, flush=True)
     from openpi.training import config as openpi_config
     from openpi.training import data_loader
 
@@ -70,7 +80,9 @@ def main() -> None:
         exp_name=args.exp_name or "preflight",
         checkpoint_base_dir=str(args.checkpoint_base_dir or ROOT / "checkpoints"),
     )
+    print("Preflight: creating OpenPI data loader and loading assets", file=sys.stderr, flush=True)
     loader = data_loader.create_data_loader(config, num_batches=1, shuffle=False)
+    print("Preflight: fetching the first batch", file=sys.stderr, flush=True)
     observation, actions = next(iter(loader))
     expected_shape = (args.batch_size, config.model.action_horizon, config.model.action_dim)
     if tuple(actions.shape) != expected_shape:
@@ -80,6 +92,8 @@ def main() -> None:
     expected_image_shape = (args.batch_size, 224, 224, 3)
     if any(tuple(image.shape) != expected_image_shape for image in observation.images.values()):
         raise ValueError(f"expected image batches with shape {expected_image_shape}")
+    if args.diagnostic_interval_s:
+        faulthandler.cancel_dump_traceback_later()
     print(json.dumps({
         "status": "preflight_passed",
         "dataset": str(dataset_root / "train"),

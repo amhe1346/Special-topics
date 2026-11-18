@@ -91,3 +91,49 @@ def test_alpine_job_rejects_unreviewed_or_nonprivate_workdir(tmp_path, mode, rev
     result = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True)
     assert result.returncode != 0
     assert expected in result.stderr
+
+
+def test_alpine_job_uses_container_gpu_and_training_arguments(tmp_path):
+    private = tmp_path / "work"
+    private.mkdir(mode=0o700)
+    project = private / "project"
+    project.mkdir()
+    venv = project / ".openpi/.venv"
+    venv.mkdir(parents=True)
+    (venv / "pyvenv.cfg").write_text("home = /usr/local/bin\n")
+    image = private / "image.sif"
+    image.touch()
+    params = private / "model-cache/openpi-assets/checkpoints/pi05_droid/params"
+    params.mkdir(parents=True)
+    (params / "_METADATA").touch()
+    (params / "manifest.ocdbt").touch()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    apptainer = bin_dir / "apptainer"
+    apptainer.write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$APPTAINERENV_CUDA_VISIBLE_DEVICES" >> "$TEST_LOG"\n'
+        'printf "%s\\n" "$@" >> "$TEST_LOG"\n'
+    )
+    apptainer.chmod(0o755)
+    log = tmp_path / "calls"
+    script = Path(__file__).resolve().parents[1] / "alpine_pi05_smoke.slurm"
+    environment = {
+        **os.environ,
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "PRIVATE_WORK_DIR": str(private),
+        "CONTAINER_IMAGE": str(image),
+        "EXPERIMENT_NAME": "test",
+        "TERMS_REVIEWED": "yes",
+        "SLURM_SUBMIT_DIR": str(project),
+        "CUDA_VISIBLE_DEVICES": "0",
+        "TEST_LOG": str(log),
+    }
+    result = subprocess.run(["bash", str(script)], env=environment, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    calls = log.read_text()
+    assert calls.count("--nv\n") == 2
+    assert calls.count("--cleanenv\n") == 2
+    assert calls.count("\n0\n") >= 1
+    assert "jax.devices" in calls
+    assert "--terms-reviewed\n" in calls
+    assert f"{private}/checkpoints" in calls
