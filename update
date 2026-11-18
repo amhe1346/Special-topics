@@ -324,3 +324,63 @@ Next steps:
 - Review the applicable checkpoint terms and any obligations before sharing
   weights. Physical robot validation and safety remain outside the current
   simulation-only scope.
+
+
+
+he job is still running, and its log confirms:
+
+JAX can see the GPU inside the batch-job container.
+The training launcher has started its data preflight and is importing dependencies.
+Training itself has not yet been confirmed.
+Imports were slow in the earlier Alpine preflight, so leave the job running for now. Check again in a few minutes:
+  squeue -j 35923530
+tail -n 40 slurm-35923530.out
+
+
+The clean-environment CPU preflight passed with exit code 0. That confirms the dataset and loader work on that CPU node; it doesn’t explain why the GPU job stayed in imports for over 12 minutes.
+
+I recommend one bounded GPU-specific import check before another training attempt. First leave the CPU session with exit. Then, on the login node, request a 15-minute GPU session:
+
+
+next time 
+
+module load slurm/alpine
+sinteractive --account=ucb-general --partition=aa100 --qos=gpu-normal --gres=gpu:a100_80gb:1 --nodes=1 --ntasks=1 --cpus-per-task=4 --mem=64G --time=00:15:00
+Once the GPU-node prompt appears, run:
+
+export WORK="/scratch/alpine/$USER/pi05-private"
+export IMAGE="$WORK/containers/python311-bookworm.sif"
+export APPTAINERENV_CUDA_VISIBLE_DEVICES="$CUDA_VISIBLE_DEVICES"
+export APPTAINERENV_OPENPI_DATA_HOME="$WORK/model-cache"
+export APPTAINERENV_HF_HOME="$WORK/huggingface"
+export APPTAINERENV_XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
+cd "$WORK/project"
+
+timeout -k 10s 600s apptainer exec --cleanenv --nv --bind "$WORK:$WORK" \
+"$IMAGE" "$WORK/project/.openpi/.venv/bin/python" -u \
+run_oracle_finetune.py --dataset results/stage_c_oracle_lerobot \
+--diagnostic-interval-s 60
+printf 'Exit code: %s\n' "$?"
+This is a preflight, not training. It uses GPU allocation time and stops after 10 minutes if needed. Share its final result, or the top of the latest diagnostic trace if it times out. Then type exit to release the GPU.
+
+GPU preflight result
+
+The CPU preflight passed in a clean container environment. The data loader and normalization work on that node, but we still don’t know why the GPU job spent over 12 minutes importing.
+
+No training ran and no checkpoint was created. The next step is a time-limited GPU preflight with diagnostics before attempting another smoke test. For now, type exit to release the CPU session.
+
+
+
+The CPU preflight passed in a clean container environment. The data loader and normalization work on that node, but we still don’t know why the GPU job spent over 12 minutes importing.
+
+No training ran and no checkpoint was created. The next step is a time-limited GPU preflight with diagnostics before attempting another smoke test. For now, type exit to release the CPU session.
+
+
+
+squeue -j 35925933
+
+Job 35925933 was submitted successfully. The ^C at the login prompt did not cancel it. You can now disconnect or turn off your computer; the job will remain queued or run on Alpine.
+
+To check its status now or later, from the Alpine login terminal:
+cd "/scratch/alpine/$USER/pi05-private/project"
+tail -n 40 slurm-35925933.out
