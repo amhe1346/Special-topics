@@ -384,3 +384,77 @@ Job 35925933 was submitted successfully. The ^C at the login prompt did not canc
 To check its status now or later, from the Alpine login terminal:
 cd "/scratch/alpine/$USER/pi05-private/project"
 tail -n 40 slurm-35925933.out
+
+
+-----
+ou can disconnect while it runs. To check it later from the Alpine login terminal:
+
+squeue -j 35997090
+
+cd "/scratch/alpine/$USER/pi05-private/project"
+tail -n 40 slurm-35997090.out
+
+
+sacct -j 35997090 --format=JobID,State,Elapsed,ExitCode,ReqMem,MaxRSS -P
+
+We’ll need the output to confirm whether training and checkpoint saving succeeded.
+
+
+The earlier job, 35925933, successfully started GPU training, but it ran out of system RAM while saving the checkpoint at step 50.
+
+It requested 64 GB of system RAM.
+Saving the model and training state required transferring data from the GPU to the node’s memory.
+Slurm detected an out-of-memory event and killed the job.
+The checkpoint was left in a temporary directory, so we can’t rely on it as a completed save.
+This was a system RAM limit, not a confirmed GPU-memory problem. The new job requests 78.75 GiB, the maximum Alpine permits for one A100 80 GB GPU. We’ll see whether that is enough.
+
+
+
+Yes. We already have evidence that job 35925933 was working up to checkpoint saving:
+
+It entered GPU training and reported a step-0 loss of 1.5723.
+Its progress advanced through the training loop.
+It reached step 50 and started saving a checkpoint.
+Slurm then killed it for exceeding its system-memory limit.
+That shows training was running, but it doesn’t yet show whether the policy improved. The checkpoint wasn’t confirmed complete, so we can’t reliably evaluate it.
+
+To examine the training progress, run this on the Alpine login terminal:
+
+This confirms the earlier job was training: it got through the first 50 steps and began saving. The initial loss was 1.5723, but this excerpt contains no later loss values, so we can’t tell whether the loss decreased or the policy improved.
+
+The new job is the next test of whether the extra system RAM is enough to finish saving. Check it with:
+
+
+While the smoke test runs, the most useful work is preparing for what we’ll do if it produces a checkpoint:
+
+Prepare the evaluation. We already have an evaluation script and an original-model baseline: 0 successes out of 5 validation seeds. We can plan to evaluate the trained checkpoint under the same conditions and compare success, failure modes, and simulated contact forces. Keep the test seeds untouched for the final evaluation.
+
+Review the demonstrations. The training set contains 20 simulated demonstrations. Looking at the saved camera examples can help us assess whether the peg and fixture are visible enough for the policy to learn alignment. Visibility alone won’t prove the task is learnable.
+
+Document progress and limitations. Note that the first GPU job reached step 50 but ran out of system RAM during checkpoint saving; the retry is currently running with more RAM. We don’t yet have a confirmed usable trained checkpoint.
+
+Check storage space. Checkpoints can be large. On the Alpine login node, you can check available
+
+
+
+Demonstration review
+The training data is a useful first imitation-learning test, but it is small and narrowly focused. It should not yet be treated as evidence that the policy can recover from mistakes or generalize to varied insertions.
+
+What looks good
+All 20 training demonstrations succeeded, with 80–85 frames each: 1,641 frames total.
+The recorded teacher actions matched the executed actions in these trials.
+The camera examples show the peg and fixture from both exterior and wrist views.
+Peak simulated contact forces in the training trials ranged from approximately 0.39 to 0.90 N. These are simulation measurements, not hardware safety guarantees.
+Main limitations
+Limited variety: fixture offsets vary by only ±0.05 mm and tilt by ±0.03°. The demonstrations cover a narrow region around the task setup.
+No recovery examples: the dataset contains successful teacher trajectories, not examples of correcting policy mistakes, dropped pegs, or substantially misaligned approaches.
+Privileged teacher: the scripted teacher uses simulator geometry and internal target history that the camera-based policy does not directly receive. The images do not establish that the policy can see the fine alignment needed to reproduce those actions.
+Gripper behavior: every training action labels the gripper as closed. That matches an insertion task starting with a grasped peg, but does not teach grasping or intentional release.
+Controller mismatch: the teacher replanned every action, whereas the policy evaluation executes up to eight actions before observing again.
+Correlated frames: 1,641 frames come from just 20 episodes; they are not 1,641 independent demonstrations.
+Recommendation
+Continue with the current smoke test to validate the training pipeline. If a checkpoint loads, evaluate it on the reserved validation fixtures before changing the dataset. Pay particular attention to drops, release requests, alignment, and contact force.
+
+If performance is poor, the next data investigation should focus on whether the cameras reveal the needed alignment and whether collecting demonstrations from a wider range of starting conditions and recovery states is appropriate. Keep the final test seeds untouched during that work.
+
+The detailed statistics are in the inspection report.

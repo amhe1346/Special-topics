@@ -598,6 +598,16 @@ control rate. The trial timed out and did not insert successfully. The first
 cold request exceeded the default five-second client timeout; run the
 non-actuating local-server preview once to warm the model before a rollout.
 
+An additional local original-checkpoint probe after a non-actuating warmup
+ran seed 1 for four simulated seconds: 60 actions, eight inference calls,
+p50 84.5 ms, p95 86.4 ms, maximum 86.9 ms, and a timeout. The RTX 4090
+reported 20,227 MiB device-wide memory in use after warmup, with the server's
+XLA memory fraction set to 0.8; allocator reservation and other GPU usage are
+included, and this is not a measured model peak. The server was stopped
+afterward. This was the original cached checkpoint, not a verified fine-tuned
+checkpoint; server configuration is not independent proof of checkpoint
+contents. This single synchronous rollout is not a PPO throughput benchmark.
+
 Collect a small set of classical impedance trials separately:
 
 ```sh
@@ -911,6 +921,366 @@ the checkpoint contents. The adapter has been tested with mock outputs; a
 fine-tuned checkpoint has not yet been trained or tested. Compare validation
 results only under matching settings; use `--split test` only for final
 held-out evaluation.
+
+#### Evaluation plan after the smoke test
+
+1. **Verify the run and its checkpoint.** Check Slurm accounting and the log
+   for successful completion and finalized checkpoint saving. Select a saved
+   step directory, not an `*.orbax-checkpoint-tmp-*` directory, and check that
+   it contains `params` and `assets/droid/norm_stats.json`. Preserve the
+   experiment name, step, job output and checkpoint outside purgeable scratch.
+   The existence of these files is not proof that the checkpoint can be restored.
+2. **Test actual loading and inference.** On a machine with the required GPU,
+   simulation and client environments, start the server with the step directory
+   as shown above. A completed evaluation warmup exercises model loading and
+   one non-actuating inference. A restore, shape or inference failure blocks
+   evaluation; serving a real fine-tuned checkpoint is not yet verified.
+3. **Run matched validation.** Run the original and fine-tuned servers
+   separately, each followed by the same command below with a new output
+   directory. Use the same software, scene, hardware where practical, and
+   evaluator settings; record any differences. The existing original 0/5
+   report is a useful reference but has only one trial per seed. Three repeats
+   per seed below provide 15 exploratory trials per model, not 15 independent
+   fixture configurations. Repeats do not reset the policy RNG or pair its
+   random draws between models.
+
+   ```sh
+   MUJOCO_GL=egl .openpi/client-venv/bin/python evaluate_pi05.py \
+     --split validation --repeats 3 --output results/REPLACE_WITH_NEW_OUTPUT
+   ```
+
+4. **Compare the reports.** Confirm both reports are complete and agree on
+   manifest hash, fixture poses, prompt, rollout settings and simulator
+   provenance. Report successes out of 15 and per-seed outcomes, dropped pegs,
+   release requests and other termination reasons, along with simulated peak
+   force and inference timing. Identify checkpoint path and step, model
+   configuration, revision and any environment differences. Differences on
+   five fixtures are exploratory, not proof of generalization or safety.
+5. **Decide on longer training.** The 100-step smoke run only checks the
+   pipeline and checkpoint loading; it remains inside the 1,000-step learning
+   rate warmup. If it works, use measured time, memory and checkpoint size to
+   plan a longer experiment. Select models and tune on validation only. Run
+   the reserved test split only after the experiment and model selection are
+   fixed, and report test results separately.
+
+Simulation pauses during inference, and the reported contact force excludes
+finger contact; neither evaluation nor the smoke test establishes real-time
+performance or physical robot safety.
+
+#### Preparing the Stage D wrench input
+
+`sensors.residual_wrench.ResidualWrenchInput` prepares the simulated hand load
+cell for the planned residual policy. Create a new instance after settling
+each trial, so its initial reading is the trial's tare. At **every physics
+step**, call `update` with the simulation time before advancing the simulator;
+at each residual control tick call `sample` with the current simulation
+time. Fill the two-step delay buffer before starting residual control. For
+example, with a settled `env`:
+
+```python
+from sensors.load_cell import EndEffectorLoadCell
+from sensors.residual_wrench import ResidualWrenchInput
+
+source = EndEffectorLoadCell(env)
+wrench = ResidualWrenchInput(source, trial_seed=0, timestep_s=env.model.opt.timestep)
+
+# Fill the delay buffer while advancing the simulation:
+for _ in range(2):
+    wrench.update(float(env.data.time))
+    env.step()
+# At the first control tick:
+wrench.update(float(env.data.time))
+sample = wrench.sample(float(env.data.time))
+# Continue calling update once per physics step and sample at control ticks.
+```
+
+The value is a tared sensor-local six-vector: force XYZ in N followed by torque
+XYZ in N m. The pipeline uses benchmark-style seeded Gaussian noise (standard
+deviations 0.05 N and 0.005 N m per axis) and a two-physics-step delay, with
+no additional filter. `sample.time_s` is the original sample's simulation
+timestamp, not the delivery time. An unavailable, malformed, future-dated,
+or older-than-0.1-second sample raises `WrenchInputError`; an invalid update
+also faults the instance. The caller must stop and report the trial rather
+than substitute zero, and apply the same sensor-health gate across variants.
+The helper is wired into the opt-in residual rollout; it is not connected to
+a trained residual policy.
+
+The wrist wrench is transmitted hand-sensor data, not the separately evaluated
+peg/environment contact-force magnitude. The tare is not physical calibration;
+these noise and age settings are provisional simulation settings, not physical
+safety limits.
+
+#### Stage D residual adapter prototype
+
+`integrations.residual_adapter.ResidualAdapter` is a simulation prototype,
+tested with mock nominal and residual actions and the simulated wrench helper.
+`run_rollout` accepts an optional `ResidualRollout` and creates a fresh adapter
+and wrench input for each trial; the default nominal-only path is unchanged.
+The opt-in path uses the settled-grasp phase to initialize the wrench delay
+buffer, with copied MuJoCo data to avoid changing the nominal physics, and
+updates the sensor at every scored physics step. It currently requires
+15 Hz and 0.1 rad/s target limits. The existing evaluation command does not
+enable this path. The adapter checks
+the sensor for both force-on and force-off variants, but only force-on policy
+observations include the wrench or its timestamp. Robot state remains
+contact-dependent in both variants.
+
+The adapter bounds each residual to +/-0.001 rad, reapplies the existing
+0.1 rad/s per-tick nominal limit and joint bounds, and returns the raw and
+bounded corrections, clipping indicators, target and actual target delta.
+A nominal gripper release returns a release request without querying the
+residual or producing a target. Errors propagate; a future rollout caller
+must stop and record the reason, not retry silently or apply a default
+correction. Wrench-input failures during the episode are recorded as
+`wrench_input_error`; failures before the episode starts propagate as errors.
+Per-tick records include wrench, sample time, nominal and residual deltas,
+clipping and executed joint target. Wrench data is logged for all variants but
+is not included in force-off policy observations. The tick check allows half a physics step of simulation-time
+rounding; it does not demonstrate a wall-clock control deadline. The mock
+tests establish adapter behavior, not learned policy performance or
+physical safety.
+
+#### Stage D contact and wrench probe
+
+`probe_residual_contact.py` runs the existing robot-driven classical position
+benchmark and records a full-rate trace of raw and tared wrist wrench, delayed
+noisy wrench and its original timestamp, and the separate peg/environment
+contact-force magnitude. A zero-output residual adapter runs in **shadow**:
+its output is never applied to the robot and its nominal action is a mock.
+This tests the observation interface during real simulated contact, not
+pi0.5 or learned residual control. For paired runs with new output directories:
+
+```sh
+.venv/bin/python probe_residual_contact.py --variant baseline --seed 0 \
+  --output results/contact_probe_baseline
+.venv/bin/python probe_residual_contact.py --variant observation_only --seed 0 \
+  --output results/contact_probe_force
+```
+
+The 0.1 N threshold used in the probe report separates samples for a simple
+diagnostic; it is not the 1 N evaluation reference or the 5 N termination
+threshold. The initial tare is captured at the first scored physics sample.
+The recorded wrench is local transmitted wrench, not contact-force ground
+truth. The shadow controller receives neither a learned reward nor an action
+to apply. Results from one seed do not establish calibration, generalization
+or physical safety.
+
+On seed 0, the position controller completed insertion after approximately
+4.972 simulated seconds. Peak peg/environment force was 0.388 N, and the
+maximum tared wrist-force magnitude was 0.183 N among samples above the
+diagnostic contact threshold, versus 0.069 N among samples at or below it.
+The two-step sample delay was 0.004 s. Across 75 shadow policy calls, the
+force-on observation included wrench 75 times and the force-off observation
+included it zero times. The recorded force traces matched across the paired
+shadow runs. Wrench noise and changes due to robot motion mean these values
+do not establish a direct force equivalence or a calibrated contact detector.
+
+Run an actual MuJoCo mock trial locally (the output directory must be new):
+
+```sh
+MUJOCO_GL=egl .venv/bin/python run_residual_mock.py \
+  --variant observation_only --correction-rad 0.0005 \
+  --output results/my_residual_mock
+```
+
+The nominal mock outputs zero joint actions with the gripper closed; the
+residual mock returns a constant correction, independent of force. A timeout
+is expected, not evidence of insertion success. The report identifies the
+mock policies, variant, settings, pilot reward and outcome; training remains
+unimplemented. For zero-residual comparison tests, run
+`.venv/bin/python -m pytest -q tests/test_residual_rollout.py`.
+
+#### Stage D experiment configurations
+
+The four factorial variants are defined in
+`integrations.residual_experiments`: `baseline`, `observation_only`,
+`reward_only`, and `combined`. Inspect the versioned, design-only JSON:
+
+```sh
+.venv/bin/python -m integrations.residual_experiments
+.venv/bin/python -m integrations.residual_experiments --variant reward_only
+```
+
+Each configuration creates an adapter with the appropriate force-observation
+setting; all variants retain the same sensor-health gate and correction limits.
+The `force_aware_reward` field selects the optional force term in the opt-in
+residual simulation rollout. The configuration JSON identifies this limited
+pilot reward scope. A separate mock-only PPO smoke runner exercises each
+configuration; these are not yet runnable real pi0.5 training experiments.
+
+#### Pilot reward diagnostics
+
+`integrations.residual_reward` defines a provisional progress potential
+`0.5 * exp(-lateral_error / 0.00008) + 0.5 * clip(depth / 0.020, 0, 1)`.
+The reward is the change in potential, plus 10 on success or minus 5 on a
+scored failure. The optional force term subtracts the physics-step integral of
+`max(peg_environment_force_n - 1, 0)` in N s. Invalid simulation or sensor
+outcomes cannot be scored. The selected PPO pilot uses discount 0.99 per
+decision step; a partial terminal interval is one terminal step with no
+terminal bootstrap. Invalid simulator, sensor, or inference states should
+abort and report the training run without scoring the invalid transition.
+The mock PPO smoke test implements these semantics. This is not a
+potential-based shaping guarantee under discounting.
+
+The opt-in residual rollout records a breakdown per executed action interval,
+including every physics-step contact-force sample through termination. It
+reports undiscounted totals only; discounting and bootstrapping are not
+implemented in the rollout itself. A nominal gripper release is logged
+separately as a zero-duration terminal event because the residual policy is
+not called for it. The PPO smoke mapper adds its -5 to the preceding action
+without another discount step; an initial release is reported but creates no
+PPO sample. A batch with no action samples aborts without an update. Invalid sensor, simulation,
+or inference outcomes mark the entire trial invalid and suppress its total;
+previous valid interval records remain available for diagnosis, and a partial
+invalid interval is not scored. The smoke learner aborts rather than train
+on that trial. Residual reward rollouts require contact to be allowed and do
+not alter the nominal-only path. Reward values and ground-truth geometry are
+not included in residual policy observations.
+
+`probe_residual_reward.py` records and scores a classical position-controlled
+trial, without pi0.5 or residual training. Its callback starts after the
+first physics step, so the first interval is omitted, and its offline 15 Hz
+intervals start at the first recorded sample. Reported totals are undiscounted.
+Run with a new output directory, for example:
+
+```sh
+.venv/bin/python probe_residual_reward.py --seed 0 --output results/reward_probe_success
+.venv/bin/python probe_residual_reward.py --seed 0 --timeout-s 1 \
+  --output results/reward_probe_timeout
+```
+
+In the recorded seed-0 runs, the success and forced timeout scored about
+10.346 and -5.105 respectively, with no force penalty in either. A separate
+previously recorded kinematic jam probe produced 7.526 N s of force excess;
+its negative 7.526 force term comes from a diagnostic that deliberately
+continues beyond the normal force stop, not an ordinary training trajectory.
+These examples verify arithmetic, not reward optimality, and highlight the
+need to assess scale, failure incentives and thresholds before PPO training.
+
+A separate robot-driven position-controller trial, seed 2 with a wider
+`--lateral-range-m 0.005 --tilt-range-deg 0.1`, stopped normally on
+`force_limit` after 6.768 simulation seconds. The last physics sample
+overshot the 5 N termination threshold to 51.964 N; this is a simulation
+failure, not a force cap. Only that 0.002 s sample exceeded 1 N, giving
+0.101928 N s of excess and undiscounted totals of -4.325 without the force
+term and -4.427 with it. These scores are not paired comparisons against the
+seed-0 success or timeout: the task conditions differ. In this example the
+force term is small relative to the -5 terminal failure penalty despite the
+large instantaneous peak; one trajectory cannot determine an adequate weight.
+
+#### Mock PPO smoke test
+
+Install the optional dependency, for example CPU PyTorch on Linux:
+
+```sh
+.venv/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu \
+  -r requirements-ppo.txt
+MUJOCO_GL=egl .venv/bin/python run_residual_ppo_smoke.py \
+  --variant combined --seed 0 --episodes 2 --timeout-s 0.3 \
+  --output results/my_ppo_smoke
+```
+
+The output directory must be new. This runs mock nominal actions with a
+stochastic residual policy, then performs one two-epoch full-batch PPO
+update; it saves a report, not a model checkpoint. The actor and critic each
+have one 32-unit tanh hidden layer. The policy samples a Gaussian latent
+action, uses its log probability for PPO, and maps it through tanh to the
+0.001 rad residual bound. PPO uses gamma 0.99, GAE lambda 0.95, clipping
+0.2, and Adam at 0.0003. Episodes terminate with no bootstrap, including
+partial final actions. All episodes are validated before the update; an
+invalid rollout aborts immediately.
+
+The fixed smoke observation vector consists of joint positions divided by pi
+rad, velocities divided by 1 rad/s, gripper fraction, and nominal deltas
+divided by 0.1/15 rad. Force-on variants append local wrist force divided by
+5 N and torque by 1 N m. Timestamps and the always-closed nominal gripper
+flag are not encoded; force-off vectors have no wrench fields. Scales are
+provisional, not limits. These settings are plumbing choices, not a validated
+training recipe or matched experiment budget.
+
+In a local rendered smoke run, two episodes per variant produced ten action
+samples and all timed out. The model parameters changed after the update.
+This does not show that the policy learned insertion or that real pi0.5
+training is ready. It does not measure GPU training, checkpointing or
+real-time performance.
+
+The same runner can use the existing localhost OpenPI server as a frozen
+nominal policy. Install the optional CPU PyTorch dependency in the **separate
+OpenPI client environment**; this avoids changing the project environment's
+NumPy to satisfy the OpenPI client's NumPy <2 requirement:
+
+```sh
+uv pip install --python .openpi/client-venv/bin/python \
+  --index-url https://download.pytorch.org/whl/cpu -r requirements-ppo.txt
+# Start run_openpi_local_server.py separately as described above.
+MUJOCO_GL=egl .openpi/client-venv/bin/python run_residual_ppo_smoke.py \
+  --nominal local-server --port 8000 --variant combined \
+  --seed 0 --episodes 2 --timeout-s 0.3 --output results/my_pi05_ppo_smoke
+```
+
+The runner makes one non-actuating warmup query, then uses a five-second
+response limit for each rollout query. The server is queried only; its model
+is not updated. The report includes self-reported server metadata, per-episode
+inference timings, rewards and the PPO update summary. Metadata alone does
+not verify checkpoint contents. The same runner defaults to the mock nominal
+policy if `--nominal` is omitted.
+
+An original-checkpoint local integration smoke ran the baseline and combined
+variants, two 0.3-second episodes each. Every episode timed out, each update
+used ten actions, and both actors changed. No force-excess penalty was active;
+force-reward behavior was separately checked with injected simulated
+force samples. These are plumbing tests, not matched experiments or evidence
+of insertion learning. The fine-tuned Alpine checkpoint has not been
+verified, and the smoke runner neither saves nor resumes checkpoints.
+
+#### Proposed residual checkpoint and resume contract
+
+Before implementing a multi-update training runner, its checkpoint should save
+the residual actor, critic and distribution parameters; optimizer and any
+scheduler state; update/environment-step/episode counters; PPO settings;
+variant, action bounds, observation encoding/scales and reward version;
+training seeds and next episode index; and RNG states for every relevant
+process/device. Include nominal model identity and a verified checkpoint
+digest, simulator/assets and code versions, and experiment configuration.
+Keep training metrics and evaluation records linked to that identity.
+
+Save only after a fully completed update at an episode boundary, write to a
+temporary file and atomically publish it, and reject incompatible or
+incomplete files on restore. Load only trusted checkpoints, and test that
+resuming preserves optimizer state and matches an uninterrupted controlled
+run. A remotely served nominal policy may have its own sampling RNG; exact
+continuation is **not** guaranteed unless its state can also be saved and
+restored. If it cannot, label the resume statistical rather than bitwise
+reproducible and record the server restart. This is a proposed contract;
+checkpointing, safe loading, server-RNG capture, and resume tests are not
+implemented in the smoke runner. Checkpoint cadence and the full training
+budget remain to be decided.
+
+#### Mock residual throughput
+
+Measure local simulation overhead across all four variants with real MuJoCo
+rendering but mock nominal and residual policies:
+
+```sh
+MUJOCO_GL=egl .venv/bin/python benchmark_residual_throughput.py \
+  --repeats 3 --timeout-s 1 --output results/my_mock_throughput
+```
+
+The output directory must be new. Each variant has one excluded warmup,
+then measured episodes with identical seed sequences. End-to-end wall time
+includes scene creation, reset, renderer setup and teardown, grasp settling,
+and rollout. Setup, rollout, and renderer teardown are timed separately.
+The report includes the warmups, separates physics steps from residual action
+steps, and records process-lifetime peak RSS in KiB on Linux. Reported
+physics steps exclude the 250 grasp-settling steps included in rollout time.
+
+One local sequential run produced approximately 33.1–34.0 action steps/s
+across variants, using three one-second simulated episodes each; all timed
+out. The process peak RSS was about 759 MiB, including warmups and all
+variants. This is a small mock-only measurement, not a comparison of variant
+performance. It excludes pi0.5 inference, PPO optimization, checkpointing,
+and GPU memory, so it cannot determine a training budget. It does not show
+real-time capability.
 
 ### Local observation and wall-paced probes
 

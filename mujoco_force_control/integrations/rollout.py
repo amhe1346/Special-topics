@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+import copy
+from dataclasses import asdict, dataclass
 import time
 
 import mujoco
@@ -13,7 +14,12 @@ from controllers.pd_position_controller import PDPositionController
 from envs.peg_episode import EpisodeConfig, PegEpisode
 from envs.peg_in_hole import PegInHoleEnv
 from integrations.pi05_droid import CHUNK_SHAPE, DroidObservation, Policy, infer_preview
+from integrations.residual_adapter import ResidualAdapter, ResidualPolicy
+from integrations.residual_experiments import ExperimentConfig
+from integrations.residual_reward import ForceSample, INVALID, TaskState, interval_reward
 from integrations.sim_observation import capture_observation
+from sensors.load_cell import EndEffectorLoadCell
+from sensors.residual_wrench import ResidualWrenchInput, WrenchInputError
 
 
 def _inference_timing_summary(
@@ -70,14 +76,32 @@ class RolloutConfig:
             raise ValueError(f"open_loop_horizon must be between 1 and {CHUNK_SHAPE[0]}")
 
 
+@dataclass(frozen=True)
+class ResidualRollout:
+    experiment: ExperimentConfig
+    policy: ResidualPolicy
+    trial_seed: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.experiment, ExperimentConfig):
+            raise ValueError("experiment must be an ExperimentConfig")
+        if type(self.trial_seed) is not int or self.trial_seed < 0:
+            raise ValueError("trial_seed must be a non-negative integer")
+
+
 def run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
                 config: RolloutConfig, *, prompt: str = "Insert the peg into the hole.",
                 on_step: Callable[[PegInHoleEnv], None] | None = None,
-                on_observation: Callable[[DroidObservation], None] | None = None) -> dict:
+                on_observation: Callable[[DroidObservation], None] | None = None,
+                residual: ResidualRollout | None = None) -> dict:
     """Run a single closed-loop simulated episode, replanning at each action."""
+    if residual is not None and (config.frequency_hz != 15.0 or config.max_joint_speed_rad_s != 0.1):
+        raise ValueError("residual adapter requires 15 Hz and 0.1 rad/s nominal target limits")
+    if residual is not None and config.no_contact:
+        raise ValueError("residual reward rollout requires contact to be allowed")
     controller = PDPositionController(env)
     try:
-        return _run_rollout(env, renderer, policy, config, controller, prompt, on_step, on_observation)
+        return _run_rollout(env, renderer, policy, config, controller, prompt, on_step, on_observation, residual)
     finally:
         env.data.ctrl[controller.actuator_ids] = 0.0
 
@@ -85,9 +109,24 @@ def run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
 def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
                  config: RolloutConfig, controller: PDPositionController, prompt: str,
                  on_step: Callable[[PegInHoleEnv], None] | None,
-                 on_observation: Callable[[DroidObservation], None] | None) -> dict:
+                 on_observation: Callable[[DroidObservation], None] | None,
+                 residual: ResidualRollout | None) -> dict:
     held, _ = controller.read_joint_state()
-    for _ in range(250):
+    wrench = None
+    sensor_env = None
+    for settle_step in range(250):
+        if residual is not None and settle_step >= 247:
+            if sensor_env is None:
+                sensor_env = copy.copy(env)
+                sensor_env.data = mujoco.MjData(env.model)
+            mujoco.mj_copyData(sensor_env.data, env.model, env.data)
+            mujoco.mj_forward(env.model, sensor_env.data)
+            if wrench is None:
+                wrench = ResidualWrenchInput(
+                    EndEffectorLoadCell(sensor_env), trial_seed=residual.trial_seed,
+                    timestep_s=float(env.model.opt.timestep),
+                )
+            wrench.update(float(env.data.time))
         controller.step(held)
         env.step()
     mujoco.mj_forward(env.model, env.data)
@@ -98,6 +137,13 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
     if config.frequency_hz * timestep > 1:
         raise ValueError("control frequency cannot exceed physics frequency")
     bounds = env.model.jnt_range[controller.joint_ids]
+    adapter: ResidualAdapter | None = None
+    if residual is not None:
+        assert wrench is not None
+        wrench.source = EndEffectorLoadCell(env)
+        adapter = residual.experiment.make_adapter(
+            residual.policy, wrench, start_time_s=float(env.data.time), physics_timestep_s=timestep,
+        )
     tick = 0
     durations = []
     decisions = []
@@ -105,6 +151,8 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
     action_chunk = ()
     action_chunk_index = 0
     active_decision = None
+    sensor_error = None
+    reward_intervals = []
     initial_fixture = env.data.mocap_pos[env.fixture_mocap_id].copy()
     while reason is None:
         if action_chunk_index >= len(action_chunk):
@@ -140,13 +188,46 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
         assert active_decision is not None
         action = action_chunk[action_chunk_index]
         action_chunk_index += 1
-        if not action.gripper_closed:
-            reason = "release_requested"
-            break
-        joints, _ = controller.read_joint_state()
-        delta = np.clip(action.joint_delta_rad, -config.max_joint_speed_rad_s / config.frequency_hz,
-                        config.max_joint_speed_rad_s / config.frequency_hz)
-        target = np.clip(joints + delta, bounds[:, 0], bounds[:, 1])
+        joints, velocities = controller.read_joint_state()
+        residual_result = None
+        if adapter is not None:
+            finger_positions = env.data.qpos[env.model.jnt_qposadr[env.finger_joint_ids]]
+            width = float(np.sum(finger_positions))
+            if not np.isfinite(width) or not -1e-5 <= width <= 0.08 + 1e-5:
+                raise ValueError("simulated gripper width is outside its expected range")
+            try:
+                residual_result = adapter.step(
+                    time_s=float(env.data.time), joint_position_rad=joints,
+                    joint_velocity_rad_s=velocities,
+                    gripper_closed_fraction=float(np.clip(1.0 - width / 0.08, 0.0, 1.0)),
+                    nominal=action, joint_bounds_rad=bounds,
+                )
+            except WrenchInputError as error:
+                reason, sensor_error = "wrench_input_error", str(error)
+                break
+            if residual_result.release_requested:
+                reason = "release_requested"
+                geometry_at_release = env.measure_geometry()
+                state = TaskState(geometry_at_release.lateral_error, geometry_at_release.depth)
+                breakdown = interval_reward(
+                    state, state, [], force_aware=residual.experiment.force_aware_reward,
+                    termination=reason,
+                )
+                reward_intervals.append({
+                    "kind": "nominal_release_event", "start_time_s": float(env.data.time),
+                    "end_time_s": float(env.data.time), "physics_steps": 0,
+                    "termination": reason, "breakdown": asdict(breakdown),
+                })
+                break
+            assert residual_result.target_rad is not None
+            target = residual_result.target_rad
+        else:
+            if not action.gripper_closed:
+                reason = "release_requested"
+                break
+            delta = np.clip(action.joint_delta_rad, -config.max_joint_speed_rad_s / config.frequency_hz,
+                            config.max_joint_speed_rad_s / config.frequency_hz)
+            target = np.clip(joints + delta, bounds[:, 0], bounds[:, 1])
         executed_delta = target - joints
         executed_velocity = executed_delta / 0.2
         execution = {
@@ -156,12 +237,43 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
             "gripper_closed": action.gripper_closed,
             "simulation_time_s": float(env.data.time),
         }
+        if residual_result is not None:
+            assert residual_result.residual_raw_rad is not None
+            assert residual_result.residual_delta_rad is not None
+            assert residual_result.residual_clipped is not None
+            assert residual_result.total_delta_clipped is not None
+            assert residual_result.joint_limit_clipped is not None
+            execution["residual"] = {
+                "wrench_time_s": residual_result.wrench_time_s,
+                "wrench_local": residual_result.wrench_local.tolist(),
+                "nominal_delta_rad": residual_result.nominal_delta_rad.tolist(),
+                "raw_delta_rad": residual_result.residual_raw_rad.tolist(),
+                "bounded_delta_rad": residual_result.residual_delta_rad.tolist(),
+                "residual_clipped": residual_result.residual_clipped.tolist(),
+                "total_delta_clipped": residual_result.total_delta_clipped.tolist(),
+                "joint_limit_clipped": residual_result.joint_limit_clipped.tolist(),
+            }
         active_decision["executed_actions"].append(execution)
         if len(active_decision["executed_actions"]) == 1:
             active_decision["joint_target_rad"] = target.tolist()
         tick += 1
         end_time = episode.start_time + tick / config.frequency_hz
+        samples_at_tick_start = len(episode.samples)
+        if residual is not None:
+            initial_geometry = env.measure_geometry()
+            initial_state = TaskState(initial_geometry.lateral_error, initial_geometry.depth)
+            interval_start_time = float(env.data.time)
         while env.data.time + timestep / 2 < end_time:
+            if wrench is not None:
+                try:
+                    wrench.update(float(env.data.time))
+                except WrenchInputError as error:
+                    reason, sensor_error = "wrench_input_error", str(error)
+                    if len(episode.samples) == samples_at_tick_start:
+                        active_decision["executed_actions"].pop()
+                        if not active_decision["executed_actions"]:
+                            active_decision.pop("joint_target_rad", None)
+                    break
             controller.step(target)
             reason = episode.step()
             if on_step is not None and reason != "invalid_state":
@@ -171,7 +283,24 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
             if config.no_contact and episode.samples[-1].force_n > 0:
                 reason = "contact"
                 break
-    if reason in ("inference_timeout", "stale_observation", "release_requested", "contact"):
+        if residual is not None and reason not in INVALID:
+            final_geometry = env.measure_geometry()
+            final_state = TaskState(final_geometry.lateral_error, final_geometry.depth)
+            interval_samples = episode.samples[samples_at_tick_start:]
+            if not interval_samples:
+                raise RuntimeError("residual action produced no physics samples")
+            breakdown = interval_reward(
+                initial_state, final_state,
+                [ForceSample(sample.force_n, timestep) for sample in interval_samples],
+                force_aware=residual.experiment.force_aware_reward, termination=reason,
+            )
+            execution["reward"] = asdict(breakdown)
+            reward_intervals.append({
+                "kind": "residual_action", "start_time_s": interval_start_time,
+                "end_time_s": float(env.data.time), "physics_steps": len(interval_samples),
+                "termination": reason, "breakdown": asdict(breakdown),
+            })
+    if reason in ("inference_timeout", "stale_observation", "release_requested", "contact", "wrench_input_error"):
         episode._finish_interval(float(env.data.time))
     geometry = None if reason == "invalid_state" else env.measure_geometry()
     sim_time = float(env.data.time - episode.start_time)
@@ -188,7 +317,7 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
         )),
         "hard_limit_n": episode.config.hard_force_n,
     }
-    return {
+    result = {
         "reason": reason, "sim_time_s": sim_time if np.isfinite(sim_time) else None,
         "inference_s": durations, "steps": len(episode.samples),
         "action_steps": sum(len(item["executed_actions"]) for item in decisions),
@@ -202,3 +331,20 @@ def _run_rollout(env: PegInHoleEnv, renderer: mujoco.Renderer, policy: Policy,
         "depth_m": None if geometry is None else geometry.depth,
         "fixture_unchanged": bool(np.array_equal(initial_fixture, env.data.mocap_pos[env.fixture_mocap_id])),
     }
+    if residual is not None:
+        result["residual_experiment"] = {
+            "variant": residual.experiment.variant.value,
+            "force_observation": residual.experiment.force_observation,
+            "force_aware_reward": residual.experiment.force_aware_reward,
+            "reward_implemented": True,
+            "reward_status": "invalid" if reason in INVALID else "complete",
+            "reward_intervals": reward_intervals,
+            "undiscounted_reward_total": (
+                None if reason in INVALID else sum(item["breakdown"]["total"] for item in reward_intervals)
+            ),
+            "training_implemented": False,
+            "wrench_seed": residual.trial_seed,
+            "wrench_tare_local": wrench.tare_local.tolist(),
+            "sensor_error": sensor_error,
+        }
+    return result

@@ -1,0 +1,2 @@
+# Optional dependency for the simulation-only PPO smoke test.
+torch>=2.2,<3
