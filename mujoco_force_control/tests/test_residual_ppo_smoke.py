@@ -13,7 +13,7 @@ from integrations.residual_experiments import Variant
 from integrations.residual_ppo_smoke import SmokePolicy, advantages_and_returns, update
 from integrations.rollout import RolloutConfig
 from sensors.residual_wrench import ResidualWrenchInput, WrenchInputError
-from test_residual_rollout import Renderer
+from tests.test_residual_rollout import Renderer
 
 
 @pytest.mark.parametrize("variant", list(Variant))

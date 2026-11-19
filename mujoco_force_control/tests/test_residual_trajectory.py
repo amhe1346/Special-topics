@@ -8,7 +8,7 @@ from integrations.residual_adapter import ForceResidualObservation, ResidualObse
 from integrations.residual_experiments import Variant, get_config
 from integrations.residual_trajectory import episode_rewards, observation_vector
 from integrations.rollout import ResidualRollout, RolloutConfig, run_rollout
-from test_residual_rollout import Nominal, Renderer, Residual
+from tests.test_residual_rollout import Nominal, Renderer, Residual
 
 
 @pytest.mark.parametrize("variant", list(Variant))
